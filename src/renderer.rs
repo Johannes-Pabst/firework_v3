@@ -1,16 +1,15 @@
-
 use noise::NoiseFn;
 use rand::Rng;
 use tokio::{io::AsyncWriteExt, process::ChildStdin};
-use wgpu::{util::DeviceExt, wgc::instance};
+use wgpu::util::DeviceExt;
 
 use crate::{HEIGHT, TW, WIDTH, colors::wavelength_to_stimul};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Screen {
-    _size: [u32; 2],
-    _padding: [u32; 2],
+    _size: [f32; 2],
+    _padding: [f32; 2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -20,16 +19,16 @@ struct Vertex {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct FlareData {
-    _pos: [f32;3],
-    _instruction:u32,
-    _v: [f32;3],
-    _lifetime:u32,
-    _color: [f32;3],
-    _buffer1:f32,
-    _cthruster_dir:[f32;3],
-    _buffer2:f32,
-    _cthruster_perp:[f32;3],
-    _buffer3:f32,
+    _pos: [f32; 3],
+    _instruction: u32,
+    _v: [f32; 3],
+    _lifetime: u32,
+    _color: [f32; 3],
+    _buffer1: f32,
+    _cthruster_dir: [f32; 3],
+    _buffer2: f32,
+    _cthruster_perp: [f32; 3],
+    _buffer3: f32,
 }
 
 fn vertex(pos: [f32; 2]) -> Vertex {
@@ -71,7 +70,18 @@ fn create_vertices() -> (Vec<Vertex>, Vec<FlareData>, Vec<u16>) {
         _buffer2: 0.0,
         _buffer3: 0.0,
     });
-
+    flares.push(FlareData {
+        _pos: [-0.01, -0.01, 0.3],
+        _color: wavelength_to_stimul(400.0),
+        _instruction: u32::MAX,
+        _v: [0.0, 0.0, 0.0],
+        _lifetime: 60,
+        _cthruster_dir: [0.0, 0.0, 0.0],
+        _cthruster_perp: [0.0, 0.0, 0.0],
+        _buffer1: 0.0,
+        _buffer2: 0.0,
+        _buffer3: 0.0,
+    });
 
     (vertices, flares, indices)
 }
@@ -84,6 +94,7 @@ pub struct State {
     vertex_buf: wgpu::Buffer,
     instance_buf_a: wgpu::Buffer,
     instance_buf_b: wgpu::Buffer,
+    counter_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     output_buf: wgpu::Buffer,
     index_count: usize,
@@ -92,7 +103,7 @@ pub struct State {
     pipeline: wgpu::RenderPipeline,
 
     instance_count: u32,
-    state_a:bool,
+    state_a: bool,
 }
 
 pub async fn prepare() -> State {
@@ -103,7 +114,8 @@ pub async fn prepare() -> State {
         .unwrap();
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::TEXTURE_FORMAT_16BIT_NORM | wgpu::Features::VERTEX_WRITABLE_STORAGE,
+            required_features: wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+                | wgpu::Features::VERTEX_WRITABLE_STORAGE,
             ..Default::default()
         })
         .await
@@ -153,6 +165,15 @@ pub async fn prepare() -> State {
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
     });
 
+    let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Particle Counter"),
+        size: 4, // u32
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+
     let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Index Buffer"),
         contents: bytemuck::cast_slice(&index_data),
@@ -160,8 +181,8 @@ pub async fn prepare() -> State {
     });
 
     let screen_uniform = Screen {
-        _size: [WIDTH, HEIGHT],
-        _padding: [0, 0],
+        _size: [WIDTH as f32, HEIGHT as f32],
+        _padding: [0.0, 0.0],
     };
 
     let screen_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -318,50 +339,51 @@ pub async fn prepare() -> State {
                 },
             ],
         });
-    let instance_bind_group_layout =
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("Instance Bind Group Layout"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: false },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
-        });
-    let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("Instance Bind Group"),
-        layout: &instance_bind_group_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: instance_buf_a.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: instance_buf_b.as_entire_binding(),
-            },
-        ],
-    });
+    // let instance_bind_group_layout =
+    //     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+    //         label: Some("Instance Bind Group Layout"),
+    //         entries: &[
+    //             wgpu::BindGroupLayoutEntry {
+    //                 binding: 0,
+    //                 visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+    //                 ty: wgpu::BindingType::Buffer {
+    //                     ty: wgpu::BufferBindingType::Storage { read_only: false },
+    //                     has_dynamic_offset: false,
+    //                     min_binding_size: None,
+    //                 },
+    //                 count: None,
+    //             },
+    //             wgpu::BindGroupLayoutEntry {
+    //                 binding: 1,
+    //                 visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+    //                 ty: wgpu::BindingType::Buffer {
+    //                     ty: wgpu::BufferBindingType::Storage { read_only: false },
+    //                     has_dynamic_offset: false,
+    //                     min_binding_size: None,
+    //                 },
+    //                 count: None,
+    //             },
+    //         ],
+    //     });
+    // let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    //     label: Some("Instance Bind Group"),
+    //     layout: &instance_bind_group_layout,
+    //     entries: &[
+    //         wgpu::BindGroupEntry {
+    //             binding: 0,
+    //             resource: instance_buf_a.as_entire_binding(),
+    //         },
+    //         wgpu::BindGroupEntry {
+    //             binding: 1,
+    //             resource: instance_buf_b.as_entire_binding(),
+    //         },
+    //     ],
+    // });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout
-        // , &instance_bind_group_layout
+        bind_group_layouts: &[
+            &bind_group_layout,
+            &texture_bind_group_layout, // , &instance_bind_group_layout
         ],
         push_constant_ranges: &[],
     });
@@ -438,6 +460,7 @@ pub async fn prepare() -> State {
         vertex_buf,
         instance_buf_a,
         instance_buf_b,
+        counter_buf,
         index_buf,
         output_buf,
         index_count: index_data.len(),
@@ -446,7 +469,7 @@ pub async fn prepare() -> State {
         pipeline,
 
         instance_count: instance_data.len() as u32,
-        state_a:true,
+        state_a: true,
     };
     state
 }
@@ -462,6 +485,9 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     let mut encoder = state
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        
+    }
     {
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -489,7 +515,14 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         rpass.set_bind_group(1, &state.texture_bind_group, &[]);
         rpass.set_index_buffer(state.index_buf.slice(..), wgpu::IndexFormat::Uint16);
         rpass.set_vertex_buffer(0, state.vertex_buf.slice(..));
-        rpass.set_vertex_buffer(1, if state.state_a{state.instance_buf_a.slice(..)}else{state.instance_buf_b.slice(..)});
+        rpass.set_vertex_buffer(
+            1,
+            if state.state_a {
+                state.instance_buf_a.slice(..)
+            } else {
+                state.instance_buf_b.slice(..)
+            },
+        );
         rpass.pop_debug_group();
         rpass.insert_debug_marker("Draw!");
         rpass.draw_indexed(0..state.index_count as u32, 0, 0..state.instance_count);
