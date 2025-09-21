@@ -11,6 +11,7 @@ var<uniform> screen: Screen;
 
 @group(2) @binding(0) var<storage, read_write> input_particles: array<FlareData>;
 @group(2) @binding(1) var<storage, read_write> output_particles: array<FlareData>;
+@group(2) @binding(2) var<storage, read_write> counter: atomic<u32>;
 
 struct FlareData {
     @location(0) pos: vec3<f32>,
@@ -81,7 +82,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
 }
 
 @compute @workgroup_size(64)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
     if (idx >= arrayLength(&input_particles)) {
         return;

@@ -1,7 +1,7 @@
 use noise::NoiseFn;
 use rand::Rng;
 use tokio::{io::AsyncWriteExt, process::ChildStdin};
-use wgpu::util::DeviceExt;
+use wgpu::{ComputePipelineDescriptor, PipelineLayoutDescriptor, util::DeviceExt};
 
 use crate::{HEIGHT, TW, WIDTH, colors::wavelength_to_stimul};
 
@@ -101,6 +101,7 @@ pub struct State {
     bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
+    compute_pipeline: wgpu::ComputePipeline,
 
     instance_count: u32,
     state_a: bool,
@@ -339,52 +340,49 @@ pub async fn prepare() -> State {
                 },
             ],
         });
-    // let instance_bind_group_layout =
-    //     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-    //         label: Some("Instance Bind Group Layout"),
-    //         entries: &[
-    //             wgpu::BindGroupLayoutEntry {
-    //                 binding: 0,
-    //                 visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
-    //                 ty: wgpu::BindingType::Buffer {
-    //                     ty: wgpu::BufferBindingType::Storage { read_only: false },
-    //                     has_dynamic_offset: false,
-    //                     min_binding_size: None,
-    //                 },
-    //                 count: None,
-    //             },
-    //             wgpu::BindGroupLayoutEntry {
-    //                 binding: 1,
-    //                 visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
-    //                 ty: wgpu::BindingType::Buffer {
-    //                     ty: wgpu::BufferBindingType::Storage { read_only: false },
-    //                     has_dynamic_offset: false,
-    //                     min_binding_size: None,
-    //                 },
-    //                 count: None,
-    //             },
-    //         ],
-    //     });
-    // let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-    //     label: Some("Instance Bind Group"),
-    //     layout: &instance_bind_group_layout,
-    //     entries: &[
-    //         wgpu::BindGroupEntry {
-    //             binding: 0,
-    //             resource: instance_buf_a.as_entire_binding(),
-    //         },
-    //         wgpu::BindGroupEntry {
-    //             binding: 1,
-    //             resource: instance_buf_b.as_entire_binding(),
-    //         },
-    //     ],
-    // });
+    let instance_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Instance Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Instance Bind Group"),
+        layout: &instance_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: instance_buf_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: instance_buf_b.as_entire_binding(),
+            },
+        ],
+    });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[
-            &bind_group_layout,
-            &texture_bind_group_layout, // , &instance_bind_group_layout
-        ],
+        bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout],
         push_constant_ranges: &[],
     });
 
@@ -452,6 +450,23 @@ pub async fn prepare() -> State {
         multiview: None,
         cache: None,
     });
+    let compute_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+        label: Some("Compute Pipeline Layout"),
+        bind_group_layouts: &[
+            &bind_group_layout,
+            &texture_bind_group_layout,
+            &instance_bind_group_layout,
+        ], //
+        push_constant_ranges: &[],
+    });
+    let compute_pipeline = device.create_compute_pipeline(&ComputePipelineDescriptor {
+        label: Some("Compute Pipeline"),
+        layout: Some(&compute_pipeline_layout),
+        module: &shader,
+        entry_point: Some("cs_main"),
+        cache: None,
+        compilation_options: Default::default(),
+    });
     let state = State {
         device,
         queue,
@@ -467,6 +482,7 @@ pub async fn prepare() -> State {
         bind_group,
         texture_bind_group,
         pipeline,
+        compute_pipeline,
 
         instance_count: instance_data.len() as u32,
         state_a: true,
@@ -486,7 +502,21 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
     {
-        
+        let slice = state.counter_buf.slice(..);
+        slice.map_async(wgpu::MapMode::Read, |_| {});
+        state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
+
+        let data = slice.get_mapped_range();
+        let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
+        drop(data);
+        state.counter_buf.unmap();
+        state
+            .queue
+            .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+        cpass.set_pipeline(&state.compute_pipeline);
+        cpass.set_bind_group(0, &state.bind_group, &[]);
+        cpass.dispatch_workgroups((count + 63) / 64, 1, 1);
     }
     {
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
