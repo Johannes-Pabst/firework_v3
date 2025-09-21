@@ -1,12 +1,15 @@
 struct Screen {
     size: vec2<u32>, // width, height
+    padding: vec2<u32>,
 };
 
-@group(0) @binding(0)
-var<uniform> screen: Screen;
+@group(0) @binding(0) var<uniform> screen: Screen;
 
 @group(1) @binding(0) var bw_tex: texture_2d<f32>;
 @group(1) @binding(1) var bw_sampler: sampler;
+
+@group(2) @binding(0) var<storage, read_write> input_particles: array<FlareData>;
+@group(2) @binding(1) var<storage, read_write> output_particles: array<FlareData>;
 
 struct FlareData {
     @location(0) pos: vec3<f32>,

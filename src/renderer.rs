@@ -1,12 +1,8 @@
-use std::{
-    io::{Stdout, Write, stdout},
-    process::Stdio,
-};
 
 use noise::NoiseFn;
 use rand::Rng;
-use tokio::{io::AsyncWriteExt, process::Command};
-use wgpu::util::DeviceExt;
+use tokio::{io::AsyncWriteExt, process::ChildStdin};
+use wgpu::{util::DeviceExt, wgc::instance};
 
 use crate::{HEIGHT, TW, WIDTH, colors::wavelength_to_stimul};
 
@@ -14,6 +10,7 @@ use crate::{HEIGHT, TW, WIDTH, colors::wavelength_to_stimul};
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Screen {
     _size: [u32; 2],
+    _padding: [u32; 2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -85,7 +82,8 @@ pub struct State {
     texture: wgpu::Texture,
 
     vertex_buf: wgpu::Buffer,
-    instance_buf: wgpu::Buffer,
+    instance_buf_a: wgpu::Buffer,
+    instance_buf_b: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     output_buf: wgpu::Buffer,
     index_count: usize,
@@ -94,6 +92,7 @@ pub struct State {
     pipeline: wgpu::RenderPipeline,
 
     instance_count: u32,
+    state_a:bool,
 }
 
 pub async fn prepare() -> State {
@@ -104,7 +103,7 @@ pub async fn prepare() -> State {
         .unwrap();
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::TEXTURE_FORMAT_16BIT_NORM,
+            required_features: wgpu::Features::TEXTURE_FORMAT_16BIT_NORM | wgpu::Features::VERTEX_WRITABLE_STORAGE,
             ..Default::default()
         })
         .await
@@ -131,8 +130,6 @@ pub async fn prepare() -> State {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    let texture_view: wgpu::TextureView =
-        render_target.create_view(&wgpu::TextureViewDescriptor::default());
 
     // Create the vertex and index buffers
     let vertex_size = size_of::<Vertex>();
@@ -145,10 +142,15 @@ pub async fn prepare() -> State {
         usage: wgpu::BufferUsages::VERTEX,
     });
 
-    let instance_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("Instance Buffer"),
+    let instance_buf_a = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer A"),
         contents: bytemuck::cast_slice(&instance_data),
-        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+    });
+    let instance_buf_b = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instance Buffer B"),
+        contents: bytemuck::cast_slice(&instance_data),
+        usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
     });
 
     let index_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -159,6 +161,7 @@ pub async fn prepare() -> State {
 
     let screen_uniform = Screen {
         _size: [WIDTH, HEIGHT],
+        _padding: [0, 0],
     };
 
     let screen_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -315,9 +318,51 @@ pub async fn prepare() -> State {
                 },
             ],
         });
+    let instance_bind_group_layout =
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("Instance Bind Group Layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        });
+    let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Instance Bind Group"),
+        layout: &instance_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: instance_buf_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: instance_buf_b.as_entire_binding(),
+            },
+        ],
+    });
     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: None,
-        bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout],
+        bind_group_layouts: &[&bind_group_layout, &texture_bind_group_layout
+        // , &instance_bind_group_layout
+        ],
         push_constant_ranges: &[],
     });
 
@@ -337,12 +382,12 @@ pub async fn prepare() -> State {
         wgpu::VertexBufferLayout {
             array_stride: vertex_size as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &wgpu::vertex_attr_array![4=>Float32x4],
+            attributes: &wgpu::vertex_attr_array![10=>Float32x4],
         },
         wgpu::VertexBufferLayout {
             array_stride: flare_data_size as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0=>Float32x3, 1=>Float32, 2=>Float32x3, 3=>Float32],
+            attributes: &wgpu::vertex_attr_array![0=>Float32x3, 1=>Uint32, 2=>Float32x3, 3=>Uint32, 4=>Float32x3, 5=>Float32, 6=>Float32x3, 7=>Float32, 8=>Float32x3, 9=>Float32],
         },
     ];
 
@@ -391,7 +436,8 @@ pub async fn prepare() -> State {
         texture: render_target,
 
         vertex_buf,
-        instance_buf,
+        instance_buf_a,
+        instance_buf_b,
         index_buf,
         output_buf,
         index_count: index_data.len(),
@@ -400,10 +446,11 @@ pub async fn prepare() -> State {
         pipeline,
 
         instance_count: instance_data.len() as u32,
+        state_a:true,
     };
     state
 }
-pub async fn render(state: &mut State) {
+pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     let texture_view = state.texture.create_view(&wgpu::TextureViewDescriptor {
         // Without add_srgb_suffix() the image we will be working with
         // might not be "gamma correct".
@@ -442,7 +489,7 @@ pub async fn render(state: &mut State) {
         rpass.set_bind_group(1, &state.texture_bind_group, &[]);
         rpass.set_index_buffer(state.index_buf.slice(..), wgpu::IndexFormat::Uint16);
         rpass.set_vertex_buffer(0, state.vertex_buf.slice(..));
-        rpass.set_vertex_buffer(1, state.instance_buf.slice(..));
+        rpass.set_vertex_buffer(1, if state.state_a{state.instance_buf_a.slice(..)}else{state.instance_buf_b.slice(..)});
         rpass.pop_debug_group();
         rpass.insert_debug_marker("Draw!");
         rpass.draw_indexed(0..state.index_count as u32, 0, 0..state.instance_count);
@@ -477,36 +524,6 @@ pub async fn render(state: &mut State) {
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
     let data = buffer_slice.get_mapped_range();
-    let mut ffmpeg = Command::new("ffmpeg")
-        .args(&[
-            "-y",
-            "-f",
-            "rawvideo",
-            "-pix_fmt",
-            "rgba",
-            "-s",
-            &format!("{}x{}", WIDTH, HEIGHT),
-            "-r",
-            "60", // FPS
-            "-i",
-            "-", // read from stdin
-            "-c:v",
-            "libx264",
-            "-crf",
-            "10",
-            "-pix_fmt",
-            "yuv420p",
-            "output.mp4",
-        ])
-        .stdin(Stdio::piped())
-        .spawn()
-        .expect("Failed to spawn ffmpeg");
-
-    let stdin = ffmpeg.stdin.as_mut().unwrap();
-    println!("Video saved to output.mp4");
-    println!("Video saved to output.mp4");
-    println!("Video saved to output.mp4");
-    println!("Video saved to output.mp4");
-    stdin.write_all(&data).await.unwrap();
-    ffmpeg.wait().await.unwrap();
+    ffmpeg_stdin.write_all(&data).await.unwrap();
+    state.state_a = !state.state_a;
 }
