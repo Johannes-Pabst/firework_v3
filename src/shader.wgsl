@@ -107,7 +107,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
     p.lifetime --;
 
-    if (p.lifetime < 0) {
+    if (p.lifetime == 0) {
         return;
     }
     let id = atomicAdd(&counter, 1u);

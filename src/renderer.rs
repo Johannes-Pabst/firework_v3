@@ -603,7 +603,7 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
             },
             &[],
         );
-        println!("    count:{}",state.instance_count);
+        println!("count:{}",state.instance_count);
         cpass.dispatch_workgroups((state.instance_count + 63) / 64, 1, 1);
     }// end mentioned block that breaks first rendered frame when uncommented
     encoder.copy_texture_to_buffer(
@@ -643,7 +643,6 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
     let data = slice.get_mapped_range();
     let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
-    println!("count: {count}");
     state.instance_count=count;
     drop(data);
     state.counter_readback_buf.unmap();
