@@ -39,6 +39,9 @@ async fn main() {
         .expect("Failed to spawn ffmpeg");
 
     let stdin = ffmpeg.stdin.as_mut().unwrap();
-    renderer::render(&mut state, stdin).await;
+    for i in 0..120{
+        renderer::render(&mut state, stdin).await;
+        println!("{i}");
+    }
     ffmpeg.wait().await.unwrap();
 }

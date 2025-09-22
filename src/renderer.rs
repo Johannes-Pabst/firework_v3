@@ -95,11 +95,14 @@ pub struct State {
     instance_buf_a: wgpu::Buffer,
     instance_buf_b: wgpu::Buffer,
     counter_buf: wgpu::Buffer,
+    counter_readback_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     output_buf: wgpu::Buffer,
     index_count: usize,
     bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
+    instance_bind_group_ra: wgpu::BindGroup,
+    instance_bind_group_rb: wgpu::BindGroup,
     pipeline: wgpu::RenderPipeline,
     compute_pipeline: wgpu::ComputePipeline,
 
@@ -115,8 +118,10 @@ pub async fn prepare() -> State {
         .unwrap();
     let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
-            required_features: wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
-                | wgpu::Features::VERTEX_WRITABLE_STORAGE,
+            required_features: //wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
+                wgpu::Features::VERTEX_WRITABLE_STORAGE
+                // wgpu::Features::default()
+                ,
             ..Default::default()
         })
         .await
@@ -166,12 +171,17 @@ pub async fn prepare() -> State {
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
     });
 
-    let counter_buf = device.create_buffer(&wgpu::BufferDescriptor {
+    let counter_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Particle Counter"),
-        size: 4, // u32
+        contents: bytemuck::bytes_of(&0u32),
         usage: wgpu::BufferUsages::STORAGE
             | wgpu::BufferUsages::COPY_DST
             | wgpu::BufferUsages::COPY_SRC,
+    });
+    let counter_readback_buf = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Counter Readback"),
+        size: 4,
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
         mapped_at_creation: false,
     });
 
@@ -212,7 +222,7 @@ pub async fn prepare() -> State {
     let fx = width / 2;
     let fy = height / 2;
 
-    let mut data: Vec<u16> = vec![0u16; (width * height) as usize];
+    let mut data: Vec<u8> = vec![0u8; (width * height) as usize];
 
     let mut rng = rand::rng();
 
@@ -253,7 +263,7 @@ pub async fn prepare() -> State {
                 min = min.min(n1);
             }
             n1 = n1.max(0.0).min(1.0);
-            data[(x + y * width) as usize] = ((n1 * (256.0 * 256.0 - 0.01)).floor()) as u16;
+            data[(x + y * width) as usize] = ((n1 * (256.0 * 256.0 - 0.01)).floor()) as u8;
         }
     }
 
@@ -271,7 +281,7 @@ pub async fn prepare() -> State {
         mip_level_count: 1,
         sample_count: 1,
         dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::R16Unorm, // single channel [0,1]
+        format: wgpu::TextureFormat::R8Unorm, // single channel [0,1]
         usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
         view_formats: &[],
     });
@@ -286,7 +296,7 @@ pub async fn prepare() -> State {
         bytemuck::cast_slice(&data),
         wgpu::TexelCopyBufferLayout {
             offset: 0,
-            bytes_per_row: Some(width * 2),
+            bytes_per_row: Some(width),
             rows_per_image: Some(height),
         },
         texture_size,
@@ -346,7 +356,17 @@ pub async fn prepare() -> State {
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -355,8 +375,8 @@ pub async fn prepare() -> State {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::COMPUTE | wgpu::ShaderStages::VERTEX,
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
@@ -366,7 +386,7 @@ pub async fn prepare() -> State {
                 },
             ],
         });
-    let instance_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+    let instance_bind_group_ra = device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("Instance Bind Group"),
         layout: &instance_bind_group_layout,
         entries: &[
@@ -377,6 +397,28 @@ pub async fn prepare() -> State {
             wgpu::BindGroupEntry {
                 binding: 1,
                 resource: instance_buf_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: counter_buf.as_entire_binding(),
+            },
+        ],
+    });
+    let instance_bind_group_rb = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Instance Bind Group"),
+        layout: &instance_bind_group_layout,
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: instance_buf_b.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: instance_buf_a.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: counter_buf.as_entire_binding(),
             },
         ],
     });
@@ -476,11 +518,15 @@ pub async fn prepare() -> State {
         instance_buf_a,
         instance_buf_b,
         counter_buf,
+        counter_readback_buf,
         index_buf,
         output_buf,
         index_count: index_data.len(),
         bind_group,
         texture_bind_group,
+        instance_bind_group_ra,
+        instance_bind_group_rb,
+
         pipeline,
         compute_pipeline,
 
@@ -501,23 +547,25 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     let mut encoder = state
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    {
-        let slice = state.counter_buf.slice(..);
-        slice.map_async(wgpu::MapMode::Read, |_| {});
-        state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
-
-        let data = slice.get_mapped_range();
-        let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
-        drop(data);
-        state.counter_buf.unmap();
-        state
-            .queue
-            .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
-        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-        cpass.set_pipeline(&state.compute_pipeline);
-        cpass.set_bind_group(0, &state.bind_group, &[]);
-        cpass.dispatch_workgroups((count + 63) / 64, 1, 1);
-    }
+    // {
+    //     state
+    //         .queue
+    //         .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
+    //     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+    //     cpass.set_pipeline(&state.compute_pipeline);
+    //     cpass.set_bind_group(0, &state.bind_group, &[]);
+    //     cpass.set_bind_group(
+    //         2,
+    //         if state.state_a {
+    //             &state.instance_bind_group_ra
+    //         } else {
+    //             &state.instance_bind_group_rb
+    //         },
+    //         &[],
+    //     );
+    //     println!("    count:{}",state.instance_count);
+    //     cpass.dispatch_workgroups((state.instance_count + 63) / 64, 1, 1);
+    // }
     {
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -581,12 +629,26 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         },
     );
 
-    state.queue.submit(Some(encoder.finish()));
 
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
+    encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
+
+    state.queue.submit(Some(encoder.finish()));
+
+    let slice = state.counter_readback_buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
+
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
+    let data = slice.get_mapped_range();
+    let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
+    println!("count: {count}");
+    state.instance_count=count;
+    drop(data);
+    state.counter_readback_buf.unmap();
     let data = buffer_slice.get_mapped_range();
     ffmpeg_stdin.write_all(&data).await.unwrap();
+    drop(data);
+    state.output_buf.unmap();
     state.state_a = !state.state_a;
 }

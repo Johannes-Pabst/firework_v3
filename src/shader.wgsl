@@ -9,7 +9,7 @@ var<uniform> screen: Screen;
 @group(1) @binding(0) var bw_tex: texture_2d<f32>;
 @group(1) @binding(1) var bw_sampler: sampler;
 
-@group(2) @binding(0) var<storage, read_write> input_particles: array<FlareData>;
+@group(2) @binding(0) var<storage, read> input_particles: array<FlareData>;
 @group(2) @binding(1) var<storage, read_write> output_particles: array<FlareData>;
 @group(2) @binding(2) var<storage, read_write> counter: atomic<u32>;
 
@@ -96,6 +96,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     p.lifetime --;
 
     if (p.lifetime > 0) {
-        output_particles[idx] = p;
+        return;
     }
+    let id = atomicAdd(&counter, 1u);
+    output_particles[id] = p;
 }
