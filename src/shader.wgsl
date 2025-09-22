@@ -9,10 +9,22 @@ var<uniform> screen: Screen;
 @group(1) @binding(0) var bw_tex: texture_2d<f32>;
 @group(1) @binding(1) var bw_sampler: sampler;
 
-@group(2) @binding(0) var<storage, read> input_particles: array<FlareData>;
-@group(2) @binding(1) var<storage, read_write> output_particles: array<FlareData>;
+@group(2) @binding(0) var<storage, read> input_particles: array<FlareDataPlain>;
+@group(2) @binding(1) var<storage, read_write> output_particles: array<FlareDataPlain>;
 @group(2) @binding(2) var<storage, read_write> counter: atomic<u32>;
 
+struct FlareDataPlain {
+    pos: vec3<f32>,
+    instruction:u32,
+    v: vec3<f32>,
+    lifetime:u32,
+    color: vec3<f32>,
+    buffer1:f32,
+    cthruster_dir:vec3<f32>,
+    buffer2:f32,
+    cthruster_perp:vec3<f32>,
+    buffer3:f32,
+}
 struct FlareData {
     @location(0) pos: vec3<f32>,
     @location(1) instruction:u32,
@@ -75,9 +87,9 @@ fn vs_main(
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var pospx=rel_to_screen(vertex.pos.xy);
     var gf=glare_falloff(distance(pospx,vertex.position.xy), vertex.radius/2)*(textureSampleMiddleDetail(bw_tex, bw_sampler, (vertex.position.xy-pospx)/500+vec2<f32>(0.5)).r+0.3);
-    if(gf==0.0){
-        return vec4<f32>(1.0,0.0,0.0,1.0);
-    }
+    // if(gf==0.0){
+    //     return vec4<f32>(1.0,0.0,0.0,1.0);
+    // }
     return vec4<f32>(gf*vertex.color.xyz, 1.0);
 }
 
@@ -95,7 +107,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
     p.lifetime --;
 
-    if (p.lifetime > 0) {
+    if (p.lifetime < 0) {
         return;
     }
     let id = atomicAdd(&counter, 1u);

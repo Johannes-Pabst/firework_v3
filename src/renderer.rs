@@ -263,7 +263,7 @@ pub async fn prepare() -> State {
                 min = min.min(n1);
             }
             n1 = n1.max(0.0).min(1.0);
-            data[(x + y * width) as usize] = ((n1 * (256.0 * 256.0 - 0.01)).floor()) as u8;
+            data[(x + y * width) as usize] = ((n1 * (256.0 - 0.01)).floor()) as u8;
         }
     }
 
@@ -547,25 +547,6 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     let mut encoder = state
         .device
         .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-    // {
-    //     state
-    //         .queue
-    //         .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
-    //     let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
-    //     cpass.set_pipeline(&state.compute_pipeline);
-    //     cpass.set_bind_group(0, &state.bind_group, &[]);
-    //     cpass.set_bind_group(
-    //         2,
-    //         if state.state_a {
-    //             &state.instance_bind_group_ra
-    //         } else {
-    //             &state.instance_bind_group_rb
-    //         },
-    //         &[],
-    //     );
-    //     println!("    count:{}",state.instance_count);
-    //     cpass.dispatch_workgroups((state.instance_count + 63) / 64, 1, 1);
-    // }
     {
         let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: None,
@@ -603,14 +584,28 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         );
         rpass.pop_debug_group();
         rpass.insert_debug_marker("Draw!");
-            println!("    count:{}",state.instance_count);
-            println!("    count:{}",state.instance_count);
-            println!("    count:{}",state.instance_count);
-            println!("    count:{}",state.instance_count);
-            println!("    count:{}",state.instance_count);
-            println!("    count:{}",state.index_count);
         rpass.draw_indexed(0..state.index_count as u32, 0, 0..state.instance_count);
     }
+    {// start mentioned block that breaks first rendered frame when uncommented
+        state
+            .queue
+            .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
+        let mut cpass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor::default());
+        cpass.set_pipeline(&state.compute_pipeline);
+        cpass.set_bind_group(0, &state.bind_group, &[]);
+        cpass.set_bind_group(1, &state.texture_bind_group, &[]);
+        cpass.set_bind_group(
+            2,
+            if state.state_a {
+                &state.instance_bind_group_ra
+            } else {
+                &state.instance_bind_group_rb
+            },
+            &[],
+        );
+        println!("    count:{}",state.instance_count);
+        cpass.dispatch_workgroups((state.instance_count + 63) / 64, 1, 1);
+    }// end mentioned block that breaks first rendered frame when uncommented
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: &state.texture,
@@ -636,22 +631,22 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     );
 
 
+    encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
+    state.queue.submit(Some(encoder.finish()));
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-    // encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
 
-    state.queue.submit(Some(encoder.finish()));
 
-    // let slice = state.counter_readback_buf.slice(..);
-    // slice.map_async(wgpu::MapMode::Read, |_| {});
+    let slice = state.counter_readback_buf.slice(..);
+    slice.map_async(wgpu::MapMode::Read, |_| {});
 
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
-    // let data = slice.get_mapped_range();
-    // let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
-    // println!("count: {count}");
-    // state.instance_count=count;
-    // drop(data);
-    // state.counter_readback_buf.unmap();
+    let data = slice.get_mapped_range();
+    let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
+    println!("count: {count}");
+    state.instance_count=count;
+    drop(data);
+    state.counter_readback_buf.unmap();
     let data = buffer_slice.get_mapped_range();
     ffmpeg_stdin.write_all(&data).await.unwrap();
     drop(data);
