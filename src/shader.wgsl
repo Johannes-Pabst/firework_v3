@@ -75,7 +75,7 @@ fn vs_main(
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var pospx=rel_to_screen(vertex.pos.xy);
     var gf=glare_falloff(distance(pospx,vertex.position.xy), vertex.radius/2)*(textureSampleMiddleDetail(bw_tex, bw_sampler, (vertex.position.xy-pospx)/500+vec2<f32>(0.5)).r+0.3);
-    if(gf==0.0&&length(pospx)<100.0){
+    if(gf==0.0){
         return vec4<f32>(1.0,0.0,0.0,1.0);
     }
     return vec4<f32>(gf*vertex.color.xyz, 1.0);

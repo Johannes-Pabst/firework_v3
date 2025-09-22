@@ -603,6 +603,12 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         );
         rpass.pop_debug_group();
         rpass.insert_debug_marker("Draw!");
+            println!("    count:{}",state.instance_count);
+            println!("    count:{}",state.instance_count);
+            println!("    count:{}",state.instance_count);
+            println!("    count:{}",state.instance_count);
+            println!("    count:{}",state.instance_count);
+            println!("    count:{}",state.index_count);
         rpass.draw_indexed(0..state.index_count as u32, 0, 0..state.instance_count);
     }
     encoder.copy_texture_to_buffer(
@@ -632,20 +638,20 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
 
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-    encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
+    // encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
 
     state.queue.submit(Some(encoder.finish()));
 
-    let slice = state.counter_readback_buf.slice(..);
-    slice.map_async(wgpu::MapMode::Read, |_| {});
+    // let slice = state.counter_readback_buf.slice(..);
+    // slice.map_async(wgpu::MapMode::Read, |_| {});
 
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
-    let data = slice.get_mapped_range();
-    let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
-    println!("count: {count}");
-    state.instance_count=count;
-    drop(data);
-    state.counter_readback_buf.unmap();
+    // let data = slice.get_mapped_range();
+    // let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
+    // println!("count: {count}");
+    // state.instance_count=count;
+    // drop(data);
+    // state.counter_readback_buf.unmap();
     let data = buffer_slice.get_mapped_range();
     ffmpeg_stdin.write_all(&data).await.unwrap();
     drop(data);
