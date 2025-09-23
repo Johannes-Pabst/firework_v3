@@ -3,7 +3,7 @@ use rand::Rng;
 use tokio::{io::AsyncWriteExt, process::ChildStdin};
 use wgpu::{ComputePipelineDescriptor, PipelineLayoutDescriptor, util::DeviceExt};
 
-use crate::{HEIGHT, TW, WIDTH, colors::wavelength_to_stimul};
+use crate::{colors::wavelength_to_stimul, instructions_helper::{CurvePoint, Helper, ParticleInstructions, Spawner}, HEIGHT, TW, WIDTH};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -57,9 +57,14 @@ fn create_vertices() -> (Vec<Vertex>, Vec<FlareData>, Vec<u16>) {
 
     quad(&mut vertices, &mut indices);
     // quad(&mut vertices, &mut indices, blue, -0.5);
-
+    let inst_h=Helper::<ParticleInstructions>::new();
+    let spwn_h=Helper::<Spawner>::new();
+    let cp_h=Vec::<CurvePoint>::new();
+    flares.push(FlareData{
+        _pos: [0.0,1.0,1.0],
+    })
     flares.push(FlareData {
-        _pos: [-0.01, -0.01, 0.1],
+        _pos: [-0.01, -0.02, 0.03],
         _color: wavelength_to_stimul(500.0),
         _instruction: u32::MAX,
         _v: [0.0, 0.0, 0.0],

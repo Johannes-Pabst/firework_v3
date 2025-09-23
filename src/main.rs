@@ -4,6 +4,7 @@ use tokio::process::Command;
 
 pub mod renderer;
 pub mod colors;
+pub mod instructions_helper;
 
 pub const WIDTH:u32=3840;
 pub const HEIGHT:u32=2160;

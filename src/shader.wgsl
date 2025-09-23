@@ -83,6 +83,13 @@ fn vs_main(
     return result;
 }
 
+fn hash44(p4:vec4<f32>)->vec4<f32>
+{
+	var p5 = fract(p4  * vec4<f32>(.1031, .1030, .0973, .1099));
+    p5 += dot(p5, p5.wzxy+33.33);
+    return fract((p5.xxyz+p5.yzzw)*p5.zywx);
+}// code from https://www.shadertoy.com/view/4djSRW
+
 @fragment
 fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     var pospx=rel_to_screen(vertex.pos.xy);
@@ -90,7 +97,7 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     // if(gf==0.0){
     //     return vec4<f32>(1.0,0.0,0.0,1.0);
     // }
-    return vec4<f32>(gf*vertex.color.xyz, 1.0);
+    return vec4<f32>(gf*vertex.color.xyz-(hash44(vec4<f32>(vertex.position.xy, vertex.pos.xy))).xyz/255.0, 1.0);
 }
 
 @compute @workgroup_size(64)
@@ -103,7 +110,7 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var p = input_particles[idx];
 
     // Simple physics
-    p.pos += p.v * 0.016;
+    p.pos += p.v * 0.0016;
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
     p.lifetime --;
 
