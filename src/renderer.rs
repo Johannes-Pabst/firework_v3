@@ -3,7 +3,11 @@ use rand::Rng;
 use tokio::{io::AsyncWriteExt, process::ChildStdin};
 use wgpu::{ComputePipelineDescriptor, PipelineLayoutDescriptor, util::DeviceExt};
 
-use crate::{colors::wavelength_to_stimul, instructions_helper::{CurvePoint, Helper, ParticleInstructions, Spawner}, HEIGHT, TW, WIDTH};
+use crate::{
+    HEIGHT, TW, WIDTH,
+    colors::wavelength_to_stimul,
+    instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner},
+};
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -24,11 +28,11 @@ struct FlareData {
     _v: [f32; 3],
     _lifetime: u32,
     _color: [f32; 3],
-    _buffer1: f32,
+    _start_time: u32,
     _cthruster_dir: [f32; 3],
-    _buffer2: f32,
+    _buffer1: f32,
     _cthruster_perp: [f32; 3],
-    _buffer3: f32,
+    _buffer2: f32,
 }
 
 fn vertex(pos: [f32; 2]) -> Vertex {
@@ -50,45 +54,72 @@ fn quad(vertices: &mut Vec<Vertex>, indices: &mut Vec<u16>) {
     indices.extend([0, 1, 2, 2, 3, 0].iter().map(|i| base + *i));
 }
 
-fn create_vertices() -> (Vec<Vertex>, Vec<FlareData>, Vec<u16>) {
+fn create_vertices() -> (
+    Vec<Vertex>,
+    Vec<FlareData>,
+    Vec<u16>,
+    Vec<ParticleInstructions>,
+    Vec<Spawner>,
+    Vec<CurvePoint>,
+) {
     let mut vertices = Vec::new();
     let mut flares = Vec::new();
     let mut indices = Vec::new();
 
     quad(&mut vertices, &mut indices);
     // quad(&mut vertices, &mut indices, blue, -0.5);
-    let inst_h=Helper::<ParticleInstructions>::new();
-    let spwn_h=Helper::<Spawner>::new();
-    let cp_h=Vec::<CurvePoint>::new();
-    flares.push(FlareData{
-        _pos: [0.0,1.0,1.0],
-    })
+    let mut inst_h = Helper::<ParticleInstructions>::new();
+    let mut spwn_h = Helper::<Spawner>::new();
+    let mut c_buf = Vec::<CurvePoint>::new();
+    inst_h.save(
+        "rocket",
+        ParticleInstructions::new(
+            &mut c_buf,
+            0.99,
+            Curve::fr_cst(2.0) * wavelength_to_stimul(600.0),
+        ),
+    );
+    spwn_h.save(
+        "rocket",
+        Spawner::new(
+            &mut c_buf,
+            1.0 / 30.0,
+            Curve::new(
+                vec![
+                    CurvePoint { _t: 60, _v: 1.0 },
+                    CurvePoint { _t: 90, _v: 0.0 },
+                ],
+                0,
+            ),
+            1.5,
+            0.5,
+            2.0,
+            inst_h.load("rocket"),
+        ),
+    );
+    inst_h.save(
+        "spawner",
+        ParticleInstructions::new(
+            &mut c_buf,
+            0.0,
+            Curve::fr_cst(1.0) * wavelength_to_stimul(450.0),
+        )
+        .with_c_thruster_spawner(spwn_h.load("rocket")),
+    );
     flares.push(FlareData {
-        _pos: [-0.01, -0.02, 0.03],
-        _color: wavelength_to_stimul(500.0),
-        _instruction: u32::MAX,
+        _pos: [0.0, 0.0, 1.0],
+        _color: [0.0, 0.0, 0.0],
         _v: [0.0, 0.0, 0.0],
-        _lifetime: 60,
-        _cthruster_dir: [0.0, 0.0, 0.0],
-        _cthruster_perp: [0.0, 0.0, 0.0],
+        _instruction: inst_h.load("spawner"),
+        _lifetime: u32::MAX,
+        _start_time: 0,
+        _cthruster_dir: [0.0, -1.0, 0.0],
+        _cthruster_perp: [1.0, 0.0, 0.0],
         _buffer1: 0.0,
         _buffer2: 0.0,
-        _buffer3: 0.0,
-    });
-    flares.push(FlareData {
-        _pos: [-0.01, -0.01, 0.3],
-        _color: wavelength_to_stimul(400.0),
-        _instruction: u32::MAX,
-        _v: [0.0, 0.0, 0.0],
-        _lifetime: 60,
-        _cthruster_dir: [0.0, 0.0, 0.0],
-        _cthruster_perp: [0.0, 0.0, 0.0],
-        _buffer1: 0.0,
-        _buffer2: 0.0,
-        _buffer3: 0.0,
     });
 
-    (vertices, flares, indices)
+    (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }
 
 pub struct State {
@@ -157,7 +188,8 @@ pub async fn prepare() -> State {
     // Create the vertex and index buffers
     let vertex_size = size_of::<Vertex>();
     let flare_data_size = size_of::<FlareData>();
-    let (vertex_data, instance_data, index_data) = create_vertices();
+    let (vertex_data, instance_data, index_data, inst_data, spawn_data, curve_data) =
+        create_vertices();
 
     let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Vertex Buffer"),
@@ -174,6 +206,21 @@ pub async fn prepare() -> State {
         label: Some("Instance Buffer B"),
         contents: bytemuck::cast_slice(&instance_data),
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::STORAGE,
+    });
+    let inst_data_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Instruction data buffer"),
+        contents: bytemuck::cast_slice(&inst_data),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let spawn_data_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Spawner data buffer"),
+        contents: bytemuck::cast_slice(&spawn_data),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    let curve_data_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("Curve data buffer"),
+        contents: bytemuck::cast_slice(&curve_data),
+        usage: wgpu::BufferUsages::STORAGE,
     });
 
     let counter_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -389,6 +436,37 @@ pub async fn prepare() -> State {
                     },
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 5,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+
             ],
         });
     let instance_bind_group_ra = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -407,6 +485,18 @@ pub async fn prepare() -> State {
                 binding: 2,
                 resource: counter_buf.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: inst_data_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: spawn_data_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: curve_data_buf.as_entire_binding(),
+            },
         ],
     });
     let instance_bind_group_rb = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -424,6 +514,18 @@ pub async fn prepare() -> State {
             wgpu::BindGroupEntry {
                 binding: 2,
                 resource: counter_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: inst_data_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: spawn_data_buf.as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: curve_data_buf.as_entire_binding(),
             },
         ],
     });
@@ -591,7 +693,8 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         rpass.insert_debug_marker("Draw!");
         rpass.draw_indexed(0..state.index_count as u32, 0, 0..state.instance_count);
     }
-    {// start mentioned block that breaks first rendered frame when uncommented
+    {
+        // start mentioned block that breaks first rendered frame when uncommented
         state
             .queue
             .write_buffer(&state.counter_buf, 0, bytemuck::cast_slice(&[0u32]));
@@ -608,9 +711,9 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
             },
             &[],
         );
-        println!("count:{}",state.instance_count);
+        println!("count:{}", state.instance_count);
         cpass.dispatch_workgroups((state.instance_count + 63) / 64, 1, 1);
-    }// end mentioned block that breaks first rendered frame when uncommented
+    } // end mentioned block that breaks first rendered frame when uncommented
     encoder.copy_texture_to_buffer(
         wgpu::TexelCopyTextureInfo {
             texture: &state.texture,
@@ -635,12 +738,10 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
         },
     );
 
-
     encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
     state.queue.submit(Some(encoder.finish()));
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-
 
     let slice = state.counter_readback_buf.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
@@ -648,7 +749,7 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
     let data = slice.get_mapped_range();
     let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
-    state.instance_count=count;
+    state.instance_count = count;
     drop(data);
     state.counter_readback_buf.unmap();
     let data = buffer_slice.get_mapped_range();

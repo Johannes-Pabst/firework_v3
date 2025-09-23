@@ -3,6 +3,40 @@ struct Screen {
     padding: vec2<f32>,
 };
 
+struct GpuCurve{// no buffer!
+    start:u32,
+    end:u32,
+    align:u32,
+}
+struct CurvePoint{// const buffer!
+    t:u32,
+    v:f32,
+}
+struct ParticleInstructions{// const buffer!
+    friction:GpuCurve,
+    v_thruster_spawner:u32,
+    v_thruster_strength:GpuCurve,
+    c_thruster_spawner:u32,
+    c_thruster_strength:GpuCurve,
+    passive_spawner:u32,
+    r:GpuCurve,
+    buffer1:u32,
+    g:GpuCurve,
+    buffer2:u32,
+    b:GpuCurve,
+    buffer3:u32,
+}
+struct Spawner{// const buffer!
+    strength:GpuCurve,
+    max_v:f32,
+    alive_fraction:GpuCurve,
+    min_v:f32,
+    instruction:u32,
+    next_spawner:u32,
+    skip_prob:f32,
+    variance:f32,
+}
+
 @group(0) @binding(0)
 var<uniform> screen: Screen;
 
@@ -12,6 +46,9 @@ var<uniform> screen: Screen;
 @group(2) @binding(0) var<storage, read> input_particles: array<FlareDataPlain>;
 @group(2) @binding(1) var<storage, read_write> output_particles: array<FlareDataPlain>;
 @group(2) @binding(2) var<storage, read_write> counter: atomic<u32>;
+@group(2) @binding(3) var<storage, read> instructions: array<ParticleInstructions>;
+@group(2) @binding(4) var<storage, read> spawners: array<Spawner>;
+@group(2) @binding(5) var<storage, read> curves: array<CurvePoint>;
 
 struct FlareDataPlain {
     pos: vec3<f32>,
@@ -19,11 +56,11 @@ struct FlareDataPlain {
     v: vec3<f32>,
     lifetime:u32,
     color: vec3<f32>,
-    buffer1:f32,
+    start_time:u32,
     cthruster_dir:vec3<f32>,
-    buffer2:f32,
+    buffer1:f32,
     cthruster_perp:vec3<f32>,
-    buffer3:f32,
+    buffer2:f32,
 }
 struct FlareData {
     @location(0) pos: vec3<f32>,
@@ -31,11 +68,11 @@ struct FlareData {
     @location(2) v: vec3<f32>,
     @location(3) lifetime:u32,
     @location(4) color: vec3<f32>,
-    @location(5) buffer1:f32,
+    @location(5) start_time:u32,
     @location(6) cthruster_dir:vec3<f32>,
-    @location(7) buffer2:f32,
+    @location(7) buffer1:f32,
     @location(8) cthruster_perp:vec3<f32>,
-    @location(9) buffer3:f32,
+    @location(9) buffer2:f32,
 }
 struct Vertex {
     @location(10) pos: vec4<f32>,
@@ -100,6 +137,27 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(gf*vertex.color.xyz-(hash44(vec4<f32>(vertex.position.xy, vertex.pos.xy))).xyz/255.0, 1.0);
 }
 
+fn sample_curve(c:GpuCurve, t:u32)->f32{
+    if(c.start>c.end){
+        return 0.0;
+    }
+    if(c.start==c.end){
+        return curves[c.start].v;
+    }
+    if(t>=curves[c.end].t){
+        return curves[c.end].v;
+    }
+    var prev=c.start;
+    while(curves[prev].t<=t && prev<c.end){
+        prev=prev+1u;
+    }
+    if(prev==c.start){
+        return curves[c.start].v;
+    }
+    return curves[prev-1u].v*(f32(curves[prev].t-t)/f32(curves[prev].t-curves[prev-1u].t))
+        +curves[prev].v*(f32(t-curves[prev-1u].t)/f32(curves[prev].t-curves[prev-1u].t));
+}
+
 @compute @workgroup_size(64)
 fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
@@ -112,6 +170,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Simple physics
     p.pos += p.v * 0.0016;
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
+    p.v*=sample_curve(instructions[p.instruction].friction, p.lifetime);
+    p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, p.lifetime),sample_curve(instructions[p.instruction].g, p.lifetime),sample_curve(instructions[p.instruction].b, p.lifetime));
     p.lifetime --;
 
     if (p.lifetime == 0) {
