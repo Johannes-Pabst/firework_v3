@@ -11,6 +11,8 @@ pub const HEIGHT:u32=2160;
 
 pub const TW:u32=2000;
 
+pub const MAX_PARTICLES:usize=1000000;
+
 #[tokio::main]
 async fn main() {
     let mut state = renderer::prepare().await;

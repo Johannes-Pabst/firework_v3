@@ -13,7 +13,8 @@ use crate::{
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 struct Screen {
     _size: [f32; 2],
-    _padding: [f32; 2],
+    _frame: u32,
+    _padding: f32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -76,7 +77,7 @@ fn create_vertices() -> (
         ParticleInstructions::new(
             &mut c_buf,
             0.99,
-            Curve::fr_cst(2.0) * wavelength_to_stimul(600.0),
+            Curve::fr_cst(2.0) * wavelength_to_stimul(550.0),
         ),
     );
     spwn_h.save(
@@ -86,8 +87,8 @@ fn create_vertices() -> (
             1.0 / 30.0,
             Curve::new(
                 vec![
-                    CurvePoint { _t: 60, _v: 1.0 },
-                    CurvePoint { _t: 90, _v: 0.0 },
+                    CurvePoint { _t: 60, _v: 1.0,_buffer:[0.0,0.0] },
+                    CurvePoint { _t: 90, _v: 0.0,_buffer:[0.0,0.0] },
                 ],
                 0,
             ),
@@ -102,22 +103,25 @@ fn create_vertices() -> (
         ParticleInstructions::new(
             &mut c_buf,
             0.0,
-            Curve::fr_cst(1.0) * wavelength_to_stimul(450.0),
+            Curve::fr_cst(100.0) * wavelength_to_stimul(450.0),
         )
         .with_c_thruster_spawner(spwn_h.load("rocket")),
     );
+    println!("Spawner instruction index: {}", inst_h.load("spawner"));
     flares.push(FlareData {
         _pos: [0.0, 0.0, 1.0],
-        _color: [0.0, 0.0, 0.0],
+        _color: [0.0, 0.0, 10.0],
         _v: [0.0, 0.0, 0.0],
         _instruction: inst_h.load("spawner"),
         _lifetime: u32::MAX,
         _start_time: 0,
-        _cthruster_dir: [0.0, -1.0, 0.0],
+        _cthruster_dir: [0.0, -5.0, 0.0],
         _cthruster_perp: [1.0, 0.0, 0.0],
         _buffer1: 0.0,
         _buffer2: 0.0,
     });
+    println!("{}", c_buf.len());
+    println!("{}", c_buf.iter().map(|x| format!("{}: {}", x._t, x._v)).collect::<Vec<String>>().join(", "));
 
     (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }
@@ -134,6 +138,7 @@ pub struct State {
     counter_readback_buf: wgpu::Buffer,
     index_buf: wgpu::Buffer,
     output_buf: wgpu::Buffer,
+    screen_buf: wgpu::Buffer,
     index_count: usize,
     bind_group: wgpu::BindGroup,
     texture_bind_group: wgpu::BindGroup,
@@ -144,20 +149,21 @@ pub struct State {
 
     instance_count: u32,
     state_a: bool,
+    frame: u32,
 }
 
 pub async fn prepare() -> State {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions::default())
-        .await
-        .unwrap();
-    let (device, queue) = adapter
+    .request_adapter(&wgpu::RequestAdapterOptions::default())
+    .await
+    .unwrap();
+let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             required_features: //wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
-                wgpu::Features::VERTEX_WRITABLE_STORAGE
-                // wgpu::Features::default()
-                ,
+            wgpu::Features::VERTEX_WRITABLE_STORAGE
+            // wgpu::Features::default()
+            ,
             ..Default::default()
         })
         .await
@@ -184,12 +190,29 @@ pub async fn prepare() -> State {
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-
+    
     // Create the vertex and index buffers
     let vertex_size = size_of::<Vertex>();
     let flare_data_size = size_of::<FlareData>();
-    let (vertex_data, instance_data, index_data, inst_data, spawn_data, curve_data) =
+    let (vertex_data, mut instance_data, index_data, inst_data, spawn_data, curve_data) =
         create_vertices();
+    let instance_count = instance_data.len() as u32;
+
+    while instance_data.len() < crate::MAX_PARTICLES {
+        instance_data.push(FlareData {
+            _pos: [0.0, 0.0, 0.0],
+            _color: [0.0, 0.0, 0.0],
+            _v: [0.0, 0.0, 0.0],
+            _instruction: 0,
+            _lifetime: 0,
+            _start_time: 0,
+            _cthruster_dir: [0.0, 0.0, 0.0],
+            _cthruster_perp: [0.0, 0.0, 0.0],
+            _buffer1: 0.0,
+            _buffer2: 0.0,
+        });
+        
+    }
 
     let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("Vertex Buffer"),
@@ -245,7 +268,8 @@ pub async fn prepare() -> State {
 
     let screen_uniform = Screen {
         _size: [WIDTH as f32, HEIGHT as f32],
-        _padding: [0.0, 0.0],
+        _frame: 0,
+        _padding: 0.0,
     };
 
     let screen_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -556,7 +580,7 @@ pub async fn prepare() -> State {
         wgpu::VertexBufferLayout {
             array_stride: flare_data_size as wgpu::BufferAddress,
             step_mode: wgpu::VertexStepMode::Instance,
-            attributes: &wgpu::vertex_attr_array![0=>Float32x3, 1=>Uint32, 2=>Float32x3, 3=>Uint32, 4=>Float32x3, 5=>Float32, 6=>Float32x3, 7=>Float32, 8=>Float32x3, 9=>Float32],
+            attributes: &wgpu::vertex_attr_array![0=>Float32x3, 1=>Uint32, 2=>Float32x3, 3=>Uint32, 4=>Float32x3, 5=>Uint32, 6=>Float32x3, 7=>Float32, 8=>Float32x3, 9=>Float32],
         },
     ];
 
@@ -628,6 +652,7 @@ pub async fn prepare() -> State {
         counter_readback_buf,
         index_buf,
         output_buf,
+        screen_buf,
         index_count: index_data.len(),
         bind_group,
         texture_bind_group,
@@ -637,8 +662,9 @@ pub async fn prepare() -> State {
         pipeline,
         compute_pipeline,
 
-        instance_count: instance_data.len() as u32,
+        instance_count,
         state_a: true,
+        frame: 0,
     };
     state
 }
@@ -737,15 +763,15 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
             depth_or_array_layers: 1,
         },
     );
-
+    
     encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
     state.queue.submit(Some(encoder.finish()));
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-
+    
     let slice = state.counter_readback_buf.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-
+    
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
     let data = slice.get_mapped_range();
     let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
@@ -756,5 +782,13 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     ffmpeg_stdin.write_all(&data).await.unwrap();
     drop(data);
     state.output_buf.unmap();
+    state.frame += 1;
+    state
+        .queue
+        .write_buffer(&state.screen_buf, 0, bytemuck::bytes_of(&Screen {
+        _size: [WIDTH as f32, HEIGHT as f32],
+        _frame: state.frame,
+        _padding: 0.0,
+    }));
     state.state_a = !state.state_a;
 }

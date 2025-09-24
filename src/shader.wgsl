@@ -1,6 +1,7 @@
 struct Screen {
     size: vec2<f32>, // width, height
-    padding: vec2<f32>,
+    frame: u32,
+    padding: f32,
 };
 
 struct GpuCurve{// no buffer!
@@ -11,6 +12,7 @@ struct GpuCurve{// no buffer!
 struct CurvePoint{// const buffer!
     t:u32,
     v:f32,
+    buffer:vec2<f32>,
 }
 struct ParticleInstructions{// const buffer!
     friction:GpuCurve,
@@ -148,7 +150,7 @@ fn sample_curve(c:GpuCurve, t:u32)->f32{
         return curves[c.end].v;
     }
     var prev=c.start;
-    while(curves[prev].t<=t && prev<c.end){
+    while(curves[prev].t<=t && prev<c.end-1){
         prev=prev+1u;
     }
     if(prev==c.start){
@@ -167,14 +169,37 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     var p = input_particles[idx];
 
-    // Simple physics
     p.pos += p.v * 0.0016;
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
-    p.v*=sample_curve(instructions[p.instruction].friction, p.lifetime);
-    p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, p.lifetime),sample_curve(instructions[p.instruction].g, p.lifetime),sample_curve(instructions[p.instruction].b, p.lifetime));
-    p.lifetime --;
+    var st = screen.frame-p.start_time-p.lifetime;
+    p.v*=sample_curve(instructions[p.instruction].friction, st);
+    p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, st),sample_curve(instructions[p.instruction].g, st),sample_curve(instructions[p.instruction].b, st));
 
-    if (p.lifetime == 0) {
+    // c_thruster_spawner
+    if(instructions[p.instruction].c_thruster_spawner!=0xffffffffu){
+        var sp=spawners[instructions[p.instruction].c_thruster_spawner];
+        var strength=sample_curve(sp.strength, st);
+        var target_bevore=u32(strength*f32(st));
+        var target_after=u32(strength*f32(st+1u));
+        var to_spawn=target_after-target_bevore;
+        for(var i=0u; i<to_spawn; i=i+1u){
+            let iid = atomicAdd(&counter, 1u);
+            output_particles[iid] = FlareDataPlain(
+                p.pos,
+                sp.instruction,
+                p.v - p.cthruster_dir,
+                200u,
+                vec3<f32>(0.0, 0.0, 0.0),
+                screen.frame,
+                p.cthruster_dir,
+                0.0,
+                p.cthruster_perp,
+                0.0
+            );
+        }
+    }
+
+    if (p.lifetime+p.start_time-screen.frame == 0) {
         return;
     }
     let id = atomicAdd(&counter, 1u);

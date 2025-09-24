@@ -12,6 +12,7 @@ pub struct GpuCurve{// no buffer!
 pub struct CurvePoint{// const buffer!
     pub _t:u32,
     pub _v:f32,
+    pub _buffer:[f32;2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -71,7 +72,7 @@ impl Curve{
         Curve { points, align }
     }
     pub fn fr_cst(v:f32)->Self{
-        Curve::new(vec![CurvePoint{_t:0,_v:v}], 0)
+        Curve::new(vec![CurvePoint{_t:0,_v:v,_buffer:[0.0,0.0]}], 0)
     }
     pub fn zero()->Self{
         Self::fr_cst(0.0)
@@ -125,18 +126,18 @@ impl<T> Helper<T>{
 impl GpuCurve{
     pub fn new(buf:&mut Vec<CurvePoint>, mut points:Vec<CurvePoint>, align:u32)->Self{
         let start=buf.len() as u32;
+        let v=points[0]._v;
         buf.extend(points.drain(..));
         let end=(buf.len()-1) as u32;
+        println!("Curve from {start} to {end} with align {align} and v1={}={}", buf[start as usize]._v, v);
         GpuCurve { _start: start, _end: end, _align: align }
     }
-    pub fn fr_cur(buf:&mut Vec<CurvePoint>, mut curve:Curve)->Self{
-        let start=buf.len() as u32;
-        buf.extend(curve.points.drain(..));
-        let end=(buf.len()-1) as u32;
-        GpuCurve { _start: start, _end: end, _align: curve.align }
+    pub fn fr_cur(buf:&mut Vec<CurvePoint>, curve:Curve)->Self{
+        GpuCurve::new(buf, curve.points, curve.align)
     }
     pub fn fr_cst(buf:&mut Vec<CurvePoint>, v:f32)->Self{
-        Self::new(buf, vec![CurvePoint{_t:0, _v:v}], 0)
+        println!("Creating constant curve with v={}", v);
+        Self::new(buf, vec![CurvePoint{_t:0, _v:v,_buffer:[0.0,0.0]}], 0)
     }
     pub fn zero(buf:&mut Vec<CurvePoint>)->Self{
         Self::fr_cst(buf, 0.0)
