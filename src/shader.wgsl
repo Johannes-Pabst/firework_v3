@@ -10,7 +10,7 @@ struct GpuCurve{// no buffer!
     align:u32,
 }
 struct CurvePoint{// const buffer!
-    t:u32,
+    t:f32,
     v:f32,
     buffer:vec2<f32>,
 }
@@ -139,25 +139,35 @@ fn fs_main(vertex: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(gf*vertex.color.xyz-(hash44(vec4<f32>(vertex.position.xy, vertex.pos.xy))).xyz/255.0, 1.0);
 }
 
-fn sample_curve(c:GpuCurve, t:u32)->f32{
+fn sample_curve(c:GpuCurve, p:FlareDataPlain, dt:f32)->f32{
+    var t:f32=dt;
+    if(c.align==0u){
+        t+=f32(screen.frame-p.start_time);
+    }else if(c.align==1u){
+        t+=f32(screen.frame-p.start_time-p.lifetime);
+    }else if(c.align==2u){
+        t+=f32(p.lifetime);
+    }else{
+        t+=0.0;
+    }
     if(c.start>c.end){
         return 0.0;
     }
-    if(c.start==c.end){
+    if(c.start==c.end||true){
         return curves[c.start].v;
     }
     if(t>=curves[c.end].t){
         return curves[c.end].v;
     }
     var prev=c.start;
-    while(curves[prev].t<=t && prev<c.end-1){
-        prev=prev+1u;
+    while(curves[prev].t<t && prev<c.end){
+        prev+=1;
     }
     if(prev==c.start){
         return curves[c.start].v;
     }
-    return curves[prev-1u].v*(f32(curves[prev].t-t)/f32(curves[prev].t-curves[prev-1u].t))
-        +curves[prev].v*(f32(t-curves[prev-1u].t)/f32(curves[prev].t-curves[prev-1u].t));
+    return curves[prev-1u].v*((curves[prev].t-t)/(curves[prev].t-curves[prev-1u].t))
+        +curves[prev].v*((t-curves[prev-1u].t)/(curves[prev].t-curves[prev-1u].t));
 }
 
 fn sphere_ran_vec(seed:vec4<f32>)->vec3<f32>{
@@ -182,7 +192,7 @@ fn sphere_hull_ran_vec(seed:vec4<f32>)->vec3<f32>{
     return vec3<f32>(0.0,0.0,0.0);
 }
 fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
-    var strength=sample_curve(sp.strength, st);
+    var strength=sample_curve(sp.strength, p, 0.0);
     var target_bevore=u32(ceil(strength*f32(st)));
     var target_after=u32(ceil(strength*f32(st+1u)));
     var to_spawn=target_after-target_bevore;
@@ -191,8 +201,8 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
         var part = FlareDataPlain(
             p.pos,
             sp.instruction,
-            p.v - add_v+sphere_ran_vec(vec4<f32>(p.pos.xy*1000.0, p.pos.z*1000.0+f32(i), f32(screen.frame)+0.62489328))*sp.max_v,
-            200u,
+            p.v + add_v+sphere_ran_vec(vec4<f32>(p.pos.xy*1000.0, p.pos.z*1000.0+f32(i), f32(screen.frame)+0.62489328))*sp.max_v,
+            0u,
             vec3<f32>(0.0, 0.0, 0.0),
             screen.frame+1,
             p.cthruster_dir,
@@ -200,7 +210,27 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
             p.cthruster_perp,
             0.0
         );
-        part.pos+=part.v*0.0016*hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328)).y;
+        var rand=hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328));
+        var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, p, 1.0-rand.y);
+        var he=0.0;//sample_curve(sp.alive_fraction, part, 0.0);
+        while(he>rand.x){
+            part.lifetime+=1u;
+        }
+        var f=sample_curve(instructions[part.instruction].friction, part, 0.0);
+        if(f<0.0){
+            part.v=vec3<f32>(0.0,0.0,0.0);
+        }else{
+            var len=length(part.v);
+            part.v*=1.0 / (1 + f * len * 0.016*rand.y);
+        }
+        part.v += vec3<f32>(0.0, -5.0, 0.0) * 0.016*rand.y;
+        var dir:vec3<f32>;
+        if(p.v.x==0.0&&p.v.y==0.0&&p.v.z==0.0){
+            dir=vec3<f32>(0);
+        }else{
+            dir=p.v/length(p.v);
+        }
+        part.pos+=part.v*0.0016*rand.y+(p.v+dir*v_thruster_strength*0.016)*(1.0-rand.y)*0.0016;
         output_particles[iid] = part;
     }
 }
@@ -213,11 +243,8 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 
     var p = input_particles[idx];
-
-    p.pos += p.v * 0.0016;
-    p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
     var st = screen.frame-p.start_time;
-    p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, st),sample_curve(instructions[p.instruction].g, st),sample_curve(instructions[p.instruction].b, st));
+
 
     // c_thruster_spawner
     if(instructions[p.instruction].c_thruster_spawner!=0xffffffffu){
@@ -228,19 +255,32 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // v_thruster_spawner
     if(instructions[p.instruction].v_thruster_spawner!=0xffffffffu){
         var sp=spawners[instructions[p.instruction].v_thruster_spawner];
-        spawn(sp, p, st, -p.v/length(p.v)*3.0);
+        spawn(sp, p, st, -p.v/length(p.v)*5.0);
     }
 
+    p.pos += p.v * 0.0016;
+    p.v += vec3<f32>(0.0, -5.0, 0.0) * 0.016;
+    p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, p, 0.0),sample_curve(instructions[p.instruction].g, p, 0.0),sample_curve(instructions[p.instruction].b, p, 0.0));
+
     // v_thruster
-    var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, st);
+    var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, p, 0.0);
     if(v_thruster_strength>0){
-        var dir=p.v/length(p.v);
+        var dir:vec3<f32>;
+        if(p.v.x==0.0&&p.v.y==0.0&&p.v.z==0.0){
+            dir=vec3<f32>(0);
+        }else{
+            dir=p.v/length(p.v);
+        }
         p.v+=dir*v_thruster_strength*0.016;
     }
 
-    var f=sample_curve(instructions[p.instruction].friction, st);
-    var len=length(p.v);
-    p.v*=(len-len*len*f)/len;
+    var f=sample_curve(instructions[p.instruction].friction, p, 0.0);
+    if(f<0.0){
+        p.v=vec3<f32>(0.0,0.0,0.0);
+    }else{
+        var len=length(p.v);
+        p.v*=1.0 / (1 + f * len * 0.016);
+    }
 
     if (p.lifetime+p.start_time-screen.frame == 0) {
         return;

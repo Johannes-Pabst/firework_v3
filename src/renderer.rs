@@ -76,29 +76,39 @@ fn create_vertices() -> (
         "exhaust",
         ParticleInstructions::new(
             &mut c_buf,
-            0.1,
-            Curve::fr_cst(0.2) * wavelength_to_stimul(600.0),
+            10.0,
+            Curve::new(vec![CurvePoint::new(-60.0, 0.2), CurvePoint::new(-30.0, 0.1), CurvePoint::new(0.0, 0.0)], 1) * wavelength_to_stimul(600.0),
         ),
     );
     spwn_h.save(
         "exhaust",
         Spawner::new(
             &mut c_buf,
-            100.0,
+            Curve::new(vec![CurvePoint::new(0.0, 40.0), CurvePoint::new(30.0, 40.0), CurvePoint::new(50.0, 4.0), CurvePoint::new(60.0, 0.4), CurvePoint::new(70.0, 0.0)], 0)*30.0,
             Curve::new(
                 vec![
                     CurvePoint {
-                        _t: 60,
+                        _t: 30.0,
                         _v: 1.0,
                         _buffer: [0.0, 0.0],
                     },
                     CurvePoint {
-                        _t: 90,
+                        _t: 40.0,
+                        _v: 0.1,
+                        _buffer: [0.0, 0.0],
+                    },
+                    CurvePoint {
+                        _t: 50.0,
+                        _v: 0.01,
+                        _buffer: [0.0, 0.0],
+                    },
+                    CurvePoint {
+                        _t: 60.0,
                         _v: 0.0,
                         _buffer: [0.0, 0.0],
                     },
                 ],
-                0,
+                2,
             ),
             1.5,
             0.5,
@@ -110,35 +120,35 @@ fn create_vertices() -> (
         "rocket",
         ParticleInstructions::new(
             &mut c_buf,
-            0.01,
-            Curve::fr_cst(2.0) * wavelength_to_stimul(550.0),
+            0.1,
+            Curve::fr_cst(0.0) * wavelength_to_stimul(550.0),
         )
-        .with_v_thruster(&mut c_buf, 20.0)
+        .with_v_thruster(&mut c_buf, Curve::new(vec![CurvePoint::new(0.0, 30.0), CurvePoint::new(30.0, 30.0), CurvePoint::new(60.0, 0.0)], 0))
         .with_v_thruster_spawner(spwn_h.load("exhaust")),
     );
     spwn_h.save(
         "rocket",
         Spawner::new(
             &mut c_buf,
-            1.0 / 30.0,
+            1.0 / 5.0,
             Curve::new(
                 vec![
                     CurvePoint {
-                        _t: 60,
+                        _t: 70.0,
                         _v: 1.0,
                         _buffer: [0.0, 0.0],
                     },
                     CurvePoint {
-                        _t: 90,
+                        _t: 70.0,
                         _v: 0.0,
                         _buffer: [0.0, 0.0],
                     },
                 ],
-                0,
+                2,
             ),
             1.5,
             0.5,
-            1.0,
+            1.5,
             inst_h.load("rocket"),
         ),
     );
@@ -146,7 +156,7 @@ fn create_vertices() -> (
         "spawner",
         ParticleInstructions::new(
             &mut c_buf,
-            0.0,
+            -1.0,
             Curve::fr_cst(100.0) * wavelength_to_stimul(450.0),
         )
         .with_c_thruster_spawner(spwn_h.load("rocket")),
@@ -163,6 +173,8 @@ fn create_vertices() -> (
         _buffer1: 0.0,
         _buffer2: 0.0,
     });
+
+    println!("hhhhhhhhhhhhhhhhhhhhhh{}", c_buf[0]._v);
 
     (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }

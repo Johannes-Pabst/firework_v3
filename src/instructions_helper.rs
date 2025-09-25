@@ -10,7 +10,7 @@ pub struct GpuCurve{// no buffer!
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct CurvePoint{// const buffer!
-    pub _t:u32,
+    pub _t:f32,
     pub _v:f32,
     pub _buffer:[f32;2],
 }
@@ -47,6 +47,11 @@ pub struct Curve{
     pub points:Vec<CurvePoint>,
     pub align:u32,
 }
+impl CurvePoint{
+    pub fn new(t:f32,v:f32)->Self{
+        CurvePoint{_t:t,_v:v,_buffer:[0.0,0.0]}
+    }
+}
 impl Mul<f32> for Curve{
     type Output=Curve;
     fn mul(mut self, rhs:f32)->Self::Output{
@@ -68,11 +73,11 @@ impl Mul<[f32;3]> for Curve{
 }
 impl Curve{
     pub fn new(mut points:Vec<CurvePoint>, align:u32)->Self{
-        points.sort_by(|a,b|a._t.cmp(&b._t));
+        points.sort_by(|a,b|a._t.partial_cmp(&b._t).unwrap());
         Curve { points, align }
     }
     pub fn fr_cst(v:f32)->Self{
-        Curve::new(vec![CurvePoint{_t:0,_v:v,_buffer:[0.0,0.0]}], 0)
+        Curve::new(vec![CurvePoint{_t:0.0,_v:v,_buffer:[0.0,0.0]}], 0)
     }
     pub fn zero()->Self{
         Self::fr_cst(0.0)
@@ -128,13 +133,14 @@ impl GpuCurve{
         let start=buf.len() as u32;
         buf.extend(points.drain(..));
         let end=(buf.len()-1) as u32;
+        println!("start: {start}, end: {end}");
         GpuCurve { _start: start, _end: end, _align: align }
     }
     pub fn fr_cur(buf:&mut Vec<CurvePoint>, curve:Curve)->Self{
         GpuCurve::new(buf, curve.points, curve.align)
     }
     pub fn fr_cst(buf:&mut Vec<CurvePoint>, v:f32)->Self{
-        Self::new(buf, vec![CurvePoint{_t:0, _v:v,_buffer:[0.0,0.0]}], 0)
+        Self::new(buf, vec![CurvePoint{_t:0.0, _v:v,_buffer:[0.0,0.0]}], 0)
     }
     pub fn zero(buf:&mut Vec<CurvePoint>)->Self{
         Self::fr_cst(buf, 0.0)
