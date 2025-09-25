@@ -1,7 +1,7 @@
 struct Screen {
     size: vec2<f32>, // width, height
     frame: u32,
-    padding: f32,
+    particles: u32,
 };
 
 struct GpuCurve{// no buffer!
@@ -160,10 +160,55 @@ fn sample_curve(c:GpuCurve, t:u32)->f32{
         +curves[prev].v*(f32(t-curves[prev-1u].t)/f32(curves[prev].t-curves[prev-1u].t));
 }
 
+fn sphere_ran_vec(seed:vec4<f32>)->vec3<f32>{
+    var out=seed;
+    while (true){
+        out=hash44(out)*2-vec4<f32>(1);
+        if(length(out.xyz)<=1){
+            return out.xyz;
+        }
+    }
+    return vec3<f32>(0.0,0.0,0.0);
+}
+fn sphere_hull_ran_vec(seed:vec4<f32>)->vec3<f32>{
+    var out=seed;
+    while (true){
+        out=hash44(out)*2-vec4<f32>(1);
+        var len=length(out.xyz);
+        if(len<=1){
+            return out.xyz/len;
+        }
+    }
+    return vec3<f32>(0.0,0.0,0.0);
+}
+fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
+    var strength=sample_curve(sp.strength, st);
+    var target_bevore=u32(ceil(strength*f32(st)));
+    var target_after=u32(ceil(strength*f32(st+1u)));
+    var to_spawn=target_after-target_bevore;
+    for(var i=0u; i<to_spawn; i=i+1u){
+        let iid = atomicAdd(&counter, 1u);
+        var part = FlareDataPlain(
+            p.pos,
+            sp.instruction,
+            p.v - add_v+sphere_ran_vec(vec4<f32>(p.pos.xy*1000.0, p.pos.z*1000.0+f32(i), f32(screen.frame)+0.62489328))*sp.max_v,
+            200u,
+            vec3<f32>(0.0, 0.0, 0.0),
+            screen.frame+1,
+            p.cthruster_dir,
+            0.0,
+            p.cthruster_perp,
+            0.0
+        );
+        part.pos+=part.v*0.0016*hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328)).y;
+        output_particles[iid] = part;
+    }
+}
+
 @compute @workgroup_size(64)
 fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let idx = gid.x;
-    if (idx >= arrayLength(&input_particles)) {
+    if (idx >= screen.particles) {
         return;
     }
 
@@ -171,33 +216,31 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     p.pos += p.v * 0.0016;
     p.v += vec3<f32>(0.0, -9.8, 0.0) * 0.016;
-    var st = screen.frame-p.start_time-p.lifetime;
-    p.v*=sample_curve(instructions[p.instruction].friction, st);
+    var st = screen.frame-p.start_time;
     p.color=vec3<f32>(sample_curve(instructions[p.instruction].r, st),sample_curve(instructions[p.instruction].g, st),sample_curve(instructions[p.instruction].b, st));
 
     // c_thruster_spawner
     if(instructions[p.instruction].c_thruster_spawner!=0xffffffffu){
         var sp=spawners[instructions[p.instruction].c_thruster_spawner];
-        var strength=sample_curve(sp.strength, st);
-        var target_bevore=u32(strength*f32(st));
-        var target_after=u32(strength*f32(st+1u));
-        var to_spawn=target_after-target_bevore;
-        for(var i=0u; i<to_spawn; i=i+1u){
-            let iid = atomicAdd(&counter, 1u);
-            output_particles[iid] = FlareDataPlain(
-                p.pos,
-                sp.instruction,
-                p.v - p.cthruster_dir,
-                200u,
-                vec3<f32>(0.0, 0.0, 0.0),
-                screen.frame,
-                p.cthruster_dir,
-                0.0,
-                p.cthruster_perp,
-                0.0
-            );
-        }
+        spawn(sp, p, st, -p.cthruster_dir);
     }
+
+    // v_thruster_spawner
+    if(instructions[p.instruction].v_thruster_spawner!=0xffffffffu){
+        var sp=spawners[instructions[p.instruction].v_thruster_spawner];
+        spawn(sp, p, st, -p.v/length(p.v)*3.0);
+    }
+
+    // v_thruster
+    var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, st);
+    if(v_thruster_strength>0){
+        var dir=p.v/length(p.v);
+        p.v+=dir*v_thruster_strength*0.016;
+    }
+
+    var f=sample_curve(instructions[p.instruction].friction, st);
+    var len=length(p.v);
+    p.v*=(len-len*len*f)/len;
 
     if (p.lifetime+p.start_time-screen.frame == 0) {
         return;

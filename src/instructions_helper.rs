@@ -126,17 +126,14 @@ impl<T> Helper<T>{
 impl GpuCurve{
     pub fn new(buf:&mut Vec<CurvePoint>, mut points:Vec<CurvePoint>, align:u32)->Self{
         let start=buf.len() as u32;
-        let v=points[0]._v;
         buf.extend(points.drain(..));
         let end=(buf.len()-1) as u32;
-        println!("Curve from {start} to {end} with align {align} and v1={}={}", buf[start as usize]._v, v);
         GpuCurve { _start: start, _end: end, _align: align }
     }
     pub fn fr_cur(buf:&mut Vec<CurvePoint>, curve:Curve)->Self{
         GpuCurve::new(buf, curve.points, curve.align)
     }
     pub fn fr_cst(buf:&mut Vec<CurvePoint>, v:f32)->Self{
-        println!("Creating constant curve with v={}", v);
         Self::new(buf, vec![CurvePoint{_t:0, _v:v,_buffer:[0.0,0.0]}], 0)
     }
     pub fn zero(buf:&mut Vec<CurvePoint>)->Self{
@@ -169,7 +166,7 @@ impl ParticleInstructions{
     }
 }
 impl Spawner{
-    pub fn new<C1,C2>(c_buf:&mut Vec<CurvePoint>, strength:C1, alive_fraction:C2, variance:f32, max_v:f32, min_v:f32, instruction:u32)->Self where C1:ToCurve, C2:ToCurve{
+    pub fn new<C1,C2>(c_buf:&mut Vec<CurvePoint>, strength:C1, alive_fraction:C2, variance:f32, min_v:f32, max_v:f32, instruction:u32)->Self where C1:ToCurve, C2:ToCurve{
         Spawner { _strength: strength.to_curve(c_buf), _max_v: max_v, _alive_fraction: alive_fraction.to_curve(c_buf), _min_v: min_v, _instruction: instruction, _next_spawner: u32::MAX, _skip_prob: 0.0, _variance: variance }
     }
     pub fn with_next_spawner(mut self, spawner:u32, skip_prob:f32)->Self{

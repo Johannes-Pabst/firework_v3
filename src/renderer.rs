@@ -14,7 +14,7 @@ use crate::{
 struct Screen {
     _size: [f32; 2],
     _frame: u32,
-    _padding: f32,
+    _particles: u32,
 }
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -73,12 +73,48 @@ fn create_vertices() -> (
     let mut spwn_h = Helper::<Spawner>::new();
     let mut c_buf = Vec::<CurvePoint>::new();
     inst_h.save(
+        "exhaust",
+        ParticleInstructions::new(
+            &mut c_buf,
+            0.1,
+            Curve::fr_cst(0.2) * wavelength_to_stimul(600.0),
+        ),
+    );
+    spwn_h.save(
+        "exhaust",
+        Spawner::new(
+            &mut c_buf,
+            100.0,
+            Curve::new(
+                vec![
+                    CurvePoint {
+                        _t: 60,
+                        _v: 1.0,
+                        _buffer: [0.0, 0.0],
+                    },
+                    CurvePoint {
+                        _t: 90,
+                        _v: 0.0,
+                        _buffer: [0.0, 0.0],
+                    },
+                ],
+                0,
+            ),
+            1.5,
+            0.5,
+            1.0,
+            inst_h.load("exhaust"),
+        ),
+    );
+    inst_h.save(
         "rocket",
         ParticleInstructions::new(
             &mut c_buf,
-            0.99,
+            0.01,
             Curve::fr_cst(2.0) * wavelength_to_stimul(550.0),
-        ),
+        )
+        .with_v_thruster(&mut c_buf, 20.0)
+        .with_v_thruster_spawner(spwn_h.load("exhaust")),
     );
     spwn_h.save(
         "rocket",
@@ -87,14 +123,22 @@ fn create_vertices() -> (
             1.0 / 30.0,
             Curve::new(
                 vec![
-                    CurvePoint { _t: 60, _v: 1.0,_buffer:[0.0,0.0] },
-                    CurvePoint { _t: 90, _v: 0.0,_buffer:[0.0,0.0] },
+                    CurvePoint {
+                        _t: 60,
+                        _v: 1.0,
+                        _buffer: [0.0, 0.0],
+                    },
+                    CurvePoint {
+                        _t: 90,
+                        _v: 0.0,
+                        _buffer: [0.0, 0.0],
+                    },
                 ],
                 0,
             ),
             1.5,
             0.5,
-            2.0,
+            1.0,
             inst_h.load("rocket"),
         ),
     );
@@ -107,9 +151,8 @@ fn create_vertices() -> (
         )
         .with_c_thruster_spawner(spwn_h.load("rocket")),
     );
-    println!("Spawner instruction index: {}", inst_h.load("spawner"));
     flares.push(FlareData {
-        _pos: [0.0, 0.0, 1.0],
+        _pos: [0.0, -1.0, 1.0],
         _color: [0.0, 0.0, 10.0],
         _v: [0.0, 0.0, 0.0],
         _instruction: inst_h.load("spawner"),
@@ -120,8 +163,6 @@ fn create_vertices() -> (
         _buffer1: 0.0,
         _buffer2: 0.0,
     });
-    println!("{}", c_buf.len());
-    println!("{}", c_buf.iter().map(|x| format!("{}: {}", x._t, x._v)).collect::<Vec<String>>().join(", "));
 
     (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }
@@ -155,10 +196,10 @@ pub struct State {
 pub async fn prepare() -> State {
     let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor::default());
     let adapter = instance
-    .request_adapter(&wgpu::RequestAdapterOptions::default())
-    .await
-    .unwrap();
-let (device, queue) = adapter
+        .request_adapter(&wgpu::RequestAdapterOptions::default())
+        .await
+        .unwrap();
+    let (device, queue) = adapter
         .request_device(&wgpu::DeviceDescriptor {
             required_features: //wgpu::Features::TEXTURE_FORMAT_16BIT_NORM
             wgpu::Features::VERTEX_WRITABLE_STORAGE
@@ -190,7 +231,7 @@ let (device, queue) = adapter
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
-    
+
     // Create the vertex and index buffers
     let vertex_size = size_of::<Vertex>();
     let flare_data_size = size_of::<FlareData>();
@@ -211,7 +252,6 @@ let (device, queue) = adapter
             _buffer1: 0.0,
             _buffer2: 0.0,
         });
-        
     }
 
     let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -269,7 +309,7 @@ let (device, queue) = adapter
     let screen_uniform = Screen {
         _size: [WIDTH as f32, HEIGHT as f32],
         _frame: 0,
-        _padding: 0.0,
+        _particles: instance_count,
     };
 
     let screen_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -490,7 +530,6 @@ let (device, queue) = adapter
                     },
                     count: None,
                 },
-
             ],
         });
     let instance_bind_group_ra = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -763,15 +802,15 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
             depth_or_array_layers: 1,
         },
     );
-    
+
     encoder.copy_buffer_to_buffer(&state.counter_buf, 0, &state.counter_readback_buf, 0, 4);
     state.queue.submit(Some(encoder.finish()));
     let buffer_slice = state.output_buf.slice(..);
     buffer_slice.map_async(wgpu::MapMode::Read, |_| ());
-    
+
     let slice = state.counter_readback_buf.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
-    
+
     state.device.poll(wgpu::wgt::PollType::Wait).unwrap();
     let data = slice.get_mapped_range();
     let count = u32::from_ne_bytes(data[0..4].try_into().unwrap());
@@ -783,12 +822,14 @@ pub async fn render(state: &mut State, ffmpeg_stdin: &mut ChildStdin) {
     drop(data);
     state.output_buf.unmap();
     state.frame += 1;
-    state
-        .queue
-        .write_buffer(&state.screen_buf, 0, bytemuck::bytes_of(&Screen {
-        _size: [WIDTH as f32, HEIGHT as f32],
-        _frame: state.frame,
-        _padding: 0.0,
-    }));
+    state.queue.write_buffer(
+        &state.screen_buf,
+        0,
+        bytemuck::bytes_of(&Screen {
+            _size: [WIDTH as f32, HEIGHT as f32],
+            _frame: state.frame,
+            _particles: state.instance_count,
+        }),
+    );
     state.state_a = !state.state_a;
 }
