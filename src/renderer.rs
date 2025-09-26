@@ -68,7 +68,6 @@ fn create_vertices() -> (
     let mut indices = Vec::new();
 
     quad(&mut vertices, &mut indices);
-    // quad(&mut vertices, &mut indices, blue, -0.5);
     let mut inst_h = Helper::<ParticleInstructions>::new();
     let mut spwn_h = Helper::<Spawner>::new();
     let mut c_buf = Vec::<CurvePoint>::new();
@@ -121,7 +120,7 @@ fn create_vertices() -> (
         ParticleInstructions::new(
             &mut c_buf,
             0.1,
-            Curve::fr_cst(0.0) * wavelength_to_stimul(550.0),
+            Curve::fr_cst(5.0) * wavelength_to_stimul(550.0),
         )
         .with_v_thruster(&mut c_buf, Curve::new(vec![CurvePoint::new(0.0, 30.0), CurvePoint::new(30.0, 30.0), CurvePoint::new(60.0, 0.0)], 0))
         .with_v_thruster_spawner(spwn_h.load("exhaust")),
@@ -139,7 +138,7 @@ fn create_vertices() -> (
                         _buffer: [0.0, 0.0],
                     },
                     CurvePoint {
-                        _t: 70.0,
+                        _t: 80.0,
                         _v: 0.0,
                         _buffer: [0.0, 0.0],
                     },
