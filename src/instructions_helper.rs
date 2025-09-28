@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Mul};
+use std::ops::Mul;
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -128,7 +128,6 @@ impl GpuCurve{
         let start=buf.len() as u32;
         buf.extend(points.drain(..));
         let end=(buf.len()-1) as u32;
-        println!("start: {start}, end: {end}");
         GpuCurve { _start: start, _end: end, _align: align }
     }
     pub fn fr_cur(buf:&mut Vec<CurvePoint>, curve:Curve)->Self{

@@ -1,4 +1,4 @@
-use crate::{colors::wavelength_to_stimul, instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner}};
+use crate::{colors::wavelength_to_stimul, instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner}, spectra::spectrum_file_to_rgb};
 
 pub struct Rocket {}
 impl Rocket {
@@ -23,7 +23,7 @@ impl Rocket {
                     ],
                     1,
                 ) * 50.0
-                    * wavelength_to_stimul(400.0),
+                    * spectrum_file_to_rgb("spectrums_nist_gov/Sr.html"),
             ),
         );
         let stars_sp=spwn_h.save(
