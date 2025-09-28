@@ -117,8 +117,8 @@ fn vs_main(
     result.color = fd.color/fd.pos.z/fd.pos.z;
     var brightness=result.color.x+result.color.y+result.color.z;
     result.radius = glare_falloff_inverse(min_brightness/brightness);
-    result.pos = fd.pos/fd.pos.z;
-    result.position = vec4<f32>(v.pos.xy/vec2<f32>(screen.size)*vec2<f32>(result.radius,result.radius)+fd.pos.xy/fd.pos.z, 0.0, 1.0);
+    result.pos = vec3<f32>((fd.pos.xy/fd.pos.z/vec2<f32>(screen.size)*vec2<f32>(screen.size.y)),0.0);
+    result.position = vec4<f32>(v.pos.xy/vec2<f32>(screen.size)*vec2<f32>(result.radius,result.radius)+(fd.pos.xy/fd.pos.z/vec2<f32>(screen.size)*vec2<f32>(screen.size.y)), 0.0, 1.0);
     return result;
 }
 
@@ -211,6 +211,13 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
         );
         var rand=hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328));
         var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, p, 1.0-rand.y);
+        var dir:vec3<f32>;
+        if(p.v.x==0.0&&p.v.y==0.0&&p.v.z==0.0){
+            dir=vec3<f32>(0);
+        }else{
+            dir=p.v/length(p.v);
+        }
+        part.v+=dir*v_thruster_strength*0.016;
         while(sample_curve(sp.alive_fraction, part, 0.0)>rand.x){
             part.lifetime+=1u;
         }
@@ -219,16 +226,11 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
             part.v=vec3<f32>(0.0,0.0,0.0);
         }else{
             var len=length(part.v);
-            part.v*=1.0 / (1 + f * len * 0.016*rand.y);
+            part.v*=1.0 / (1 + f * len * 0.016*(1-rand.y));
         }
         part.v += vec3<f32>(0.0, -5.0, 0.0) * 0.016*rand.y;
-        var dir:vec3<f32>;
-        if(p.v.x==0.0&&p.v.y==0.0&&p.v.z==0.0){
-            dir=vec3<f32>(0);
-        }else{
-            dir=p.v/length(p.v);
-        }
-        part.pos+=part.v*0.0016*rand.y+(p.v+dir*v_thruster_strength*0.016)*(1.0-rand.y)*0.0016;
+        part.pos+=part.v*0.0016*rand.y+(p.v+dir*v_thruster_strength*(1.0-rand.y)*0.016)*(1.0-rand.y)*0.0016;
+        part.color=vec3<f32>(sample_curve(instructions[part.instruction].r, part, 0.0),sample_curve(instructions[part.instruction].g, part, 0.0),sample_curve(instructions[part.instruction].b, part, 0.0));
         let iid = atomicAdd(&counter, 1u);
         output_particles[iid] = part;
     }
@@ -253,7 +255,13 @@ fn cs_main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // v_thruster_spawner
     if(instructions[p.instruction].v_thruster_spawner!=0xffffffffu){
         var sp=spawners[instructions[p.instruction].v_thruster_spawner];
-        spawn(sp, p, st, -p.v/length(p.v)*5.0);
+        spawn(sp, p, st, -p.v/length(p.v)*30.0);
+    }
+
+    // passive_spawner
+    if(instructions[p.instruction].passive_spawner!=0xffffffffu){
+        var sp=spawners[instructions[p.instruction].passive_spawner];
+        spawn(sp, p, st, vec3<f32>(0.0,0.0,0.0));
     }
 
     p.pos += p.v * 0.0016;

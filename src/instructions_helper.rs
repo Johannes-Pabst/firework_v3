@@ -93,7 +93,6 @@ pub struct HelperElement<T>{
     pub e:T,
 }
 pub struct Helper<T>{
-    pub ids:HashMap<String,u32>,
     pub data:Vec<T>,
 }
 pub trait ToCurve{
@@ -115,17 +114,13 @@ impl ToCurve for Curve{
     }
 }
 impl<T> Helper<T>{
-    pub fn save(&mut self,name:&str,e:T)->u32{
+    pub fn save(&mut self,e:T)->u32{
         let i = self.data.len() as u32;
-        self.ids.insert(name.to_string(), i);
         self.data.push(e);
         i
     }
-    pub fn load(&self, name:&str)->u32{
-        *self.ids.get(&name.to_string()).unwrap()
-    }
     pub fn new()->Self{
-        Helper { ids: HashMap::new(), data: Vec::new() }
+        Helper { data: Vec::new() }
     }
 }
 impl GpuCurve{

@@ -4,9 +4,7 @@ use tokio::{io::AsyncWriteExt, process::ChildStdin};
 use wgpu::{ComputePipelineDescriptor, PipelineLayoutDescriptor, util::DeviceExt};
 
 use crate::{
-    HEIGHT, TW, WIDTH,
-    colors::wavelength_to_stimul,
-    instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner},
+    colors::wavelength_to_stimul, instructions_generator::Rocket, instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner}, HEIGHT, TW, WIDTH
 };
 
 #[repr(C)]
@@ -71,100 +69,20 @@ fn create_vertices() -> (
     let mut inst_h = Helper::<ParticleInstructions>::new();
     let mut spwn_h = Helper::<Spawner>::new();
     let mut c_buf = Vec::<CurvePoint>::new();
-    inst_h.save(
-        "exhaust",
-        ParticleInstructions::new(
-            &mut c_buf,
-            10.0,
-            Curve::new(vec![CurvePoint::new(-60.0, 0.2), CurvePoint::new(-30.0, 0.1), CurvePoint::new(0.0, 0.0)], 1) * wavelength_to_stimul(600.0),
-        ),
-    );
-    spwn_h.save(
-        "exhaust",
-        Spawner::new(
-            &mut c_buf,
-            Curve::new(vec![CurvePoint::new(0.0, 40.0), CurvePoint::new(30.0, 40.0), CurvePoint::new(50.0, 4.0), CurvePoint::new(60.0, 0.4), CurvePoint::new(70.0, 0.0)], 0)*30.0,
-            Curve::new(
-                vec![
-                    CurvePoint {
-                        _t: 30.0,
-                        _v: 1.0,
-                        _buffer: [0.0, 0.0],
-                    },
-                    CurvePoint {
-                        _t: 40.0,
-                        _v: 0.1,
-                        _buffer: [0.0, 0.0],
-                    },
-                    CurvePoint {
-                        _t: 50.0,
-                        _v: 0.01,
-                        _buffer: [0.0, 0.0],
-                    },
-                    CurvePoint {
-                        _t: 60.0,
-                        _v: 0.0,
-                        _buffer: [0.0, 0.0],
-                    },
-                ],
-                2,
-            ),
-            1.5,
-            0.5,
-            1.0,
-            inst_h.load("exhaust"),
-        ),
-    );
-    inst_h.save(
-        "rocket",
-        ParticleInstructions::new(
-            &mut c_buf,
-            0.1,
-            Curve::fr_cst(5.0) * wavelength_to_stimul(550.0),
-        )
-        .with_v_thruster(&mut c_buf, Curve::new(vec![CurvePoint::new(0.0, 30.0), CurvePoint::new(30.0, 30.0), CurvePoint::new(60.0, 0.0)], 0))
-        .with_v_thruster_spawner(spwn_h.load("exhaust")),
-    );
-    spwn_h.save(
-        "rocket",
-        Spawner::new(
-            &mut c_buf,
-            1.0 / 5.0,
-            Curve::new(
-                vec![
-                    CurvePoint {
-                        _t: 70.0,
-                        _v: 1.0,
-                        _buffer: [0.0, 0.0],
-                    },
-                    CurvePoint {
-                        _t: 80.0,
-                        _v: 0.0,
-                        _buffer: [0.0, 0.0],
-                    },
-                ],
-                2,
-            ),
-            1.5,
-            0.5,
-            1.5,
-            inst_h.load("rocket"),
-        ),
-    );
-    inst_h.save(
-        "spawner",
+    let rocket=Rocket::new().generate_instructions(&mut inst_h, &mut spwn_h, &mut c_buf);
+    let spawner=inst_h.save(
         ParticleInstructions::new(
             &mut c_buf,
             -1.0,
             Curve::fr_cst(100.0) * wavelength_to_stimul(450.0),
         )
-        .with_c_thruster_spawner(spwn_h.load("rocket")),
+        .with_c_thruster_spawner(rocket),
     );
     flares.push(FlareData {
         _pos: [0.0, -1.0, 1.0],
         _color: [0.0, 0.0, 10.0],
         _v: [0.0, 0.0, 0.0],
-        _instruction: inst_h.load("spawner"),
+        _instruction: spawner,
         _lifetime: u32::MAX,
         _start_time: 0,
         _cthruster_dir: [0.0, -5.0, 0.0],
@@ -172,8 +90,6 @@ fn create_vertices() -> (
         _buffer1: 0.0,
         _buffer2: 0.0,
     });
-
-    println!("hhhhhhhhhhhhhhhhhhhhhh{}", c_buf[0]._v);
 
     (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }
@@ -216,6 +132,11 @@ pub async fn prepare() -> State {
             wgpu::Features::VERTEX_WRITABLE_STORAGE
             // wgpu::Features::default()
             ,
+            required_limits: wgpu::Limits {
+                max_buffer_size: 1 << 30,
+                max_storage_buffer_binding_size: 1 << 30,
+                ..Default::default()
+            },
             ..Default::default()
         })
         .await

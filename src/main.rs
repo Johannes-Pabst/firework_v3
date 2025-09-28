@@ -5,13 +5,15 @@ use tokio::process::Command;
 pub mod renderer;
 pub mod colors;
 pub mod instructions_helper;
+pub mod instructions_generator;
+pub mod spectra;
 
 pub const WIDTH:u32=3840;
 pub const HEIGHT:u32=2160;
 
 pub const TW:u32=2000;
 
-pub const MAX_PARTICLES:usize=1000000;
+pub const MAX_PARTICLES:usize=10000000;
 
 #[tokio::main]
 async fn main() {
