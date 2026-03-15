@@ -38,9 +38,9 @@ async fn main() {
             "-c:v",
             "libx264",
             "-crf",
-            "10",
+            "8",
             "-pix_fmt",
-            "yuv420p",
+            "yuv420p10le",
             "output.mp4",
         ])
         .stdin(Stdio::piped())

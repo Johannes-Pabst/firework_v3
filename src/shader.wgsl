@@ -197,10 +197,15 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
     var target_after=u32(ceil(strength*f32(st+1u)));
     var to_spawn=target_after-target_bevore;
     for(var i=0u; i<to_spawn; i++){
+        var rand=hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328));
+        var m_sp=sp;
+        while(m_sp.next_spawner!=0xffffffffu&&rand.w<m_sp.skip_prob){
+            m_sp=spawners[m_sp.next_spawner];
+        }
         var part = FlareDataPlain(
             p.pos,
-            sp.instruction,
-            p.v + add_v+sphere_ran_vec(vec4<f32>(p.pos.xy*1000.0, p.pos.z*1000.0+f32(i), f32(screen.frame)+0.62489328))*sp.max_v,
+            m_sp.instruction,
+            p.v + add_v+sphere_ran_vec(vec4<f32>(p.pos.xy*1000.0, p.pos.z*1000.0+f32(i), f32(screen.frame)+0.62489328))*m_sp.max_v,
             0u,
             vec3<f32>(0.0, 0.0, 0.0),
             screen.frame,
@@ -209,7 +214,6 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
             p.cthruster_perp,
             0.0
         );
-        var rand=hash44(vec4<f32>(p.pos.zy*1000.0, p.pos.x*1000.0+f32(i), f32(screen.frame)+0.62489328));
         var v_thruster_strength=sample_curve(instructions[p.instruction].v_thruster_strength, p, 1.0-rand.y);
         var dir:vec3<f32>;
         if(p.v.x==0.0&&p.v.y==0.0&&p.v.z==0.0){
@@ -218,7 +222,7 @@ fn spawn(sp:Spawner, p:FlareDataPlain, st:u32, add_v:vec3<f32>){
             dir=p.v/length(p.v);
         }
         part.v+=dir*v_thruster_strength*0.016;
-        while(sample_curve(sp.alive_fraction, part, 0.0)>rand.x){
+        while(sample_curve(m_sp.alive_fraction, part, 0.0)>rand.x){
             part.lifetime+=1u;
         }
         var f=sample_curve(instructions[part.instruction].friction, part, 0.0);

@@ -4,7 +4,10 @@ use tokio::{io::AsyncWriteExt, process::ChildStdin};
 use wgpu::{ComputePipelineDescriptor, PipelineLayoutDescriptor, util::DeviceExt};
 
 use crate::{
-    colors::wavelength_to_stimul, instructions_generator::Rocket, instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner}, HEIGHT, TW, WIDTH
+    HEIGHT, TW, WIDTH,
+    colors::wavelength_to_stimul,
+    instructions_generator::Rocket,
+    instructions_helper::{Curve, CurvePoint, Helper, ParticleInstructions, Spawner},
 };
 
 #[repr(C)]
@@ -69,27 +72,47 @@ fn create_vertices() -> (
     let mut inst_h = Helper::<ParticleInstructions>::new();
     let mut spwn_h = Helper::<Spawner>::new();
     let mut c_buf = Vec::<CurvePoint>::new();
-    let rocket=Rocket::new().generate_instructions(&mut inst_h, &mut spwn_h, &mut c_buf);
-    let spawner=inst_h.save(
-        ParticleInstructions::new(
+    if true{
+        let rocket = Rocket::new().generate_instructions(&mut inst_h, &mut spwn_h, &mut c_buf);
+        let spawner=inst_h.save(
+            ParticleInstructions::new(
+                &mut c_buf,
+                -1.0,
+                Curve::fr_cst(100.0) * wavelength_to_stimul(450.0),
+            )
+            .with_c_thruster_spawner(rocket),
+        );
+        flares.push(FlareData {
+            _pos: [0.0, -1.0, 1.0],
+            _color: [0.0, 0.0, 10.0],
+            _v: [0.0, 0.0, 0.0],
+            _instruction: spawner,
+            _lifetime: u32::MAX,
+            _start_time: 0,
+            _cthruster_dir: [0.0, -5.0, 0.0],
+            _cthruster_perp: [1.0, 0.0, 0.0],
+            _buffer1: 0.0,
+            _buffer2: 0.0,
+        });
+    }else{
+        let test = inst_h.save(ParticleInstructions::new(
             &mut c_buf,
             -1.0,
-            Curve::fr_cst(100.0) * wavelength_to_stimul(450.0),
-        )
-        .with_c_thruster_spawner(rocket),
-    );
-    flares.push(FlareData {
-        _pos: [0.0, -1.0, 1.0],
-        _color: [0.0, 0.0, 10.0],
-        _v: [0.0, 0.0, 0.0],
-        _instruction: spawner,
-        _lifetime: u32::MAX,
-        _start_time: 0,
-        _cthruster_dir: [0.0, -5.0, 0.0],
-        _cthruster_perp: [1.0, 0.0, 0.0],
-        _buffer1: 0.0,
-        _buffer2: 0.0,
-    });
+            Curve::fr_cst(3000.0) * wavelength_to_stimul(450.0),
+        ));
+        flares.push(FlareData {
+            _pos: [0.0, 0.0, 1.0],
+            _color: [0.0, 0.0, 10.0],
+            _v: [0.0, 0.0, 0.0],
+            _instruction: test,
+            _lifetime: u32::MAX,
+            _start_time: 0,
+            _cthruster_dir: [0.0, -5.0, 0.0],
+            _cthruster_perp: [1.0, 0.0, 0.0],
+            _buffer1: 0.0,
+            _buffer2: 0.0,
+        });
+    }
 
     (vertices, flares, indices, inst_h.data, spwn_h.data, c_buf)
 }
@@ -295,14 +318,16 @@ pub async fn prepare() -> State {
                 let dy =
                     ((ry as f64 + rng.random_range(-1.0..1.0) * 0.1) - fy as f64) / distance as f64;
 
-                n1 = (noise.get([dx * 25.0, dy * 25.0, distance * 3.0 * 0.01])
-                    + noise.get([dx * 50.0, dy * 50.0, distance * 3.0 * 0.02])
-                    + noise.get([dx * 100.0, dy * 100.0, distance * 3.0 * 0.04])
-                    + noise.get([dx * 200.0, dy * 200.0, distance * 3.0 * 0.08])
-                    + noise.get([dx * 400.0, dy * 400.0, distance * 3.0 * 0.16])
-                    + noise.get([dx * 800.0, dy * 800.0, distance * 3.0 * 0.32])
+                n1 = (noise.get([dx * 6.25, dy * 6.25, distance * 3.0 * 0.0025]) * 0.7f64.powi(-2)
+                    + noise.get([dx * 12.5, dy * 12.5, distance * 3.0 * 0.005]) * 0.7f64.powi(-1)
+                    + noise.get([dx * 25.0, dy * 25.0, distance * 3.0 * 0.01]) * 0.7f64.powi(0)
+                    + noise.get([dx * 50.0, dy * 50.0, distance * 3.0 * 0.02]) * 0.7f64.powi(1)
+                    + noise.get([dx * 100.0, dy * 100.0, distance * 3.0 * 0.04]) * 0.7f64.powi(2)
+                    + noise.get([dx * 200.0, dy * 200.0, distance * 3.0 * 0.08]) * 0.7f64.powi(3)
+                    + noise.get([dx * 400.0, dy * 400.0, distance * 3.0 * 0.16]) * 0.7f64.powi(4)
+                    + noise.get([dx * 800.0, dy * 800.0, distance * 3.0 * 0.32]) * 0.7f64.powi(5)
                     + noise.get([dx * 1600.0, dy * 1600.0, distance * 3.0 * 0.64])
-                    + noise.get([dx * 3200.0, dy * 3200.0, distance * 3.0 * 1.28]))
+                        * 0.9f64.powi(6))
                     / 8.0
                     / 2.0
                     * 2.9

@@ -169,6 +169,16 @@ impl Spawner{
     pub fn new<C1,C2>(c_buf:&mut Vec<CurvePoint>, strength:C1, alive_fraction:C2, variance:f32, min_v:f32, max_v:f32, instruction:u32)->Self where C1:ToCurve, C2:ToCurve{
         Spawner { _strength: strength.to_curve(c_buf), _max_v: max_v, _alive_fraction: alive_fraction.to_curve(c_buf), _min_v: min_v, _instruction: instruction, _next_spawner: u32::MAX, _skip_prob: 0.0, _variance: variance }
     }
+    pub fn list(helper:&mut Helper<Spawner>, mut list:Vec<Spawner>)->u32{
+        let mut last=u32::MAX;
+        let len=list.len();
+        for (i,mut n) in list.drain(..).enumerate(){
+            n._next_spawner=last;
+            n._skip_prob=i as f32/len as f32;
+            last=helper.save(n);
+        }
+        last
+    }
     pub fn with_next_spawner(mut self, spawner:u32, skip_prob:f32)->Self{
         self._next_spawner=spawner;
         self._skip_prob=skip_prob;
