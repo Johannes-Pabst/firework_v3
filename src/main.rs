@@ -2,13 +2,10 @@ use std::process::Stdio;
 
 use tokio::process::Command;
 
-use crate::spectra::spectrum_file_to_rgb;
-
 pub mod renderer;
 pub mod colors;
 pub mod instructions_helper;
 pub mod instructions_generator;
-pub mod spectra;
 
 pub const WIDTH:u32=3840;
 pub const HEIGHT:u32=2160;
@@ -19,8 +16,6 @@ pub const MAX_PARTICLES:usize=10000000;
 
 #[tokio::main]
 async fn main() {
-    let c=spectrum_file_to_rgb("spectrums_nist_gov/Sr.html");
-    println!("r: {}, g: {}, b: {}", c[0], c[1], c[2]);
     let mut state = renderer::prepare().await;
     let mut ffmpeg = Command::new("ffmpeg")
         .args(&[
