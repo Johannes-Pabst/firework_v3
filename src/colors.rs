@@ -1,4 +1,6 @@
-pub fn wavelength_to_stimul(wavelength: f32) -> [f32;3] {
+use std::ops::{Add, Mul};
+
+pub fn wavelength_to_stimul(wavelength: f32) -> Stimul {
     const VALUES: &[&[f32]] = &[
         &[-42.926358, -210.656885, 207.388095], //a0
         &[-2.039680, -0.145807, -6.306562],     //a1
@@ -31,9 +33,42 @@ pub fn wavelength_to_stimul(wavelength: f32) -> [f32;3] {
             10.0f32.powf(sum)
         })
         .collect::<Vec<f32>>();
-    [
+    Stimul{data:[
         vec[0],
         vec[1],
         vec[2],
-    ]
+    ]}
+}
+#[derive(Clone)]
+pub struct Stimul{
+    pub data:[f32;3],
+}
+impl Add for Stimul{
+    type Output=Self;
+
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.data[0]+=rhs.data[0];
+        self.data[1]+=rhs.data[1];
+        self.data[2]+=rhs.data[2];
+        self
+    }
+}
+impl Mul<f32> for Stimul{
+    type Output = Self;
+
+    fn mul(mut self, rhs: f32) -> Self::Output {
+        self.data[0]*=rhs;
+        self.data[1]*=rhs;
+        self.data[2]*=rhs;
+        self
+    }
+}
+impl Stimul{
+    pub fn set_brightness(mut self, brightness:f32)->Self{
+        let b=self.data[0]+self.data[1]+self.data[2];
+        self.data[0]*=brightness/b;
+        self.data[1]*=brightness/b;
+        self.data[2]*=brightness/b;
+        self
+    }
 }

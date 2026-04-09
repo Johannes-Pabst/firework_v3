@@ -69,8 +69,13 @@ impl Rocket {
             1.0,
             exhaust,
         ));
-        let list = [400.0f32, 450.0, 500.0, 600.0]
-            .iter()
+        let list = [
+            (wavelength_to_stimul(589.0-30.0)).set_brightness(1.0),   // orange Na
+            (wavelength_to_stimul(513.8-25.0)).set_brightness(1.0),     // green BaCl
+            (wavelength_to_stimul(440.0)).set_brightness(1.0),     // blue CuCl
+            ((wavelength_to_stimul(606.0)*0.15+wavelength_to_stimul(623.9)*0.1+wavelength_to_stimul(635.9)*0.35+wavelength_to_stimul(648.3)*0.15+wavelength_to_stimul(662.0)*0.45+wavelength_to_stimul(674.5)*0.45)*1.0).set_brightness(1.0),//red SrCl
+            (((wavelength_to_stimul(606.0)*0.15+wavelength_to_stimul(623.9)*0.1+wavelength_to_stimul(635.9)*0.35+wavelength_to_stimul(648.3)*0.15+wavelength_to_stimul(662.0)*0.45+wavelength_to_stimul(674.5)*0.45)*1.0+wavelength_to_stimul(440.0))*0.5).set_brightness(1.0),//violet SrCl + CuCl
+        ].iter()
             .map(|wl| {
                 let stars = inst_h.save(ParticleInstructions::new(
                     c_buf,
@@ -83,7 +88,7 @@ impl Rocket {
                         ],
                         1,
                     ) * 50.0
-                        * wavelength_to_stimul(*wl),
+                        * wl.clone(),
                 ));
                 let stars_sp = spwn_h.save(Spawner::new(
                     c_buf,

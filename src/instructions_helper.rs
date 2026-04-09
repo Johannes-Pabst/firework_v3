@@ -1,5 +1,7 @@
 use std::ops::Mul;
 
+use crate::colors::Stimul;
+
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuCurve{// no buffer!
@@ -61,13 +63,13 @@ impl Mul<f32> for Curve{
         self
     }
 }
-impl Mul<[f32;3]> for Curve{
+impl Mul<Stimul> for Curve{
     type Output=ColCurve;
-    fn mul(self, rhs:[f32;3])->Self::Output{
+    fn mul(self, rhs:Stimul)->Self::Output{
         ColCurve{
-            r:self.clone()*rhs[0],
-            g:self.clone()*rhs[1],
-            b:self*rhs[2],
+            r:self.clone()*rhs.data[0],
+            g:self.clone()*rhs.data[1],
+            b:self*rhs.data[2],
         }
     }
 }
